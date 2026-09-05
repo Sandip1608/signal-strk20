@@ -1,0 +1,16 @@
+# Cairo / Scarb
+contracts/target/
+
+# Node / Next.js
+app/node_modules/
+app/.next/
+app/out/
+
+# Env & local secrets (session keys live client-side — never commit)
+.env
+.env.local
+.env*.local
+
+# OS noise
+.DS_Store
+Thumbs.db
