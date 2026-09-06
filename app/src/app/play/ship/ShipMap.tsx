@@ -142,7 +142,10 @@ export function ShipMap({
   return (
     <div className={s.wrap}>
       {/* ── deck ─────────────────────────────────────────────────────── */}
-      <div className={s.deck}>
+      {/* Lights out only ever hid the other crewmates from the roster. The deck
+          itself stayed fully lit, so the one sabotage the crew are supposed to
+          panic about looked like nothing happened. */}
+      <div className={`${s.deck} ${dark ? s.deckDark : ""}`}>
         <Corridors />
         {ROOMS.map((room) => {
           const isHere = room.id === here;
@@ -158,6 +161,10 @@ export function ShipMap({
               type="button"
               disabled={!reachable}
               onClick={() => reachable && onMove(room.id)}
+              // Each room gets its own accent in the stylesheet. Six identical
+              // dark cards read as a menu; Electrical being green and Reactor
+              // being hot is most of what makes this read as a ship.
+              data-room={room.id}
               style={{ gridColumn: room.col + 1, gridRow: room.row + 1 }}
               className={[
                 s.room,
@@ -174,7 +181,13 @@ export function ShipMap({
 
               <span className={s.dots}>
                 {dots.map((seat) => (
-                  <span key={seat} className={seat === me.seat ? s.dotMe : undefined}>
+                  <span
+                    key={seat}
+                    className={`${s.dot} ${seat === me.seat ? s.dotMe : ""}`}
+                    // Staggered so the room does not bob in lockstep, which
+                    // reads as a broken loop rather than as people standing.
+                    style={{ animationDelay: `${(seat % 5) * 0.24}s` }}
+                  >
                     <Crewmate
                       seat={seat}
                       size={22}

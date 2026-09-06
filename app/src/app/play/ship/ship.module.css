@@ -13,13 +13,37 @@
   position: relative;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(2, minmax(96px, 1fr));
-  gap: 8px;
-  padding: 10px;
+  grid-template-rows: repeat(2, minmax(112px, 1fr));
+  gap: 10px;
+  padding: 12px;
   border-radius: 14px;
+  /* Hull plating behind the rooms: a faint diagonal weave over the dark, so
+     the gaps between rooms read as ship rather than as page background. */
   background:
+    repeating-linear-gradient(45deg, #0e0f1b 0 6px, #0b0c15 6px 12px),
     linear-gradient(180deg, #0d0e18, #0a0b13);
   border: 1px solid #24263a;
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.6);
+}
+
+/* Lights sabotaged: the deck drops to almost nothing but your own room, with a
+   vignette closing in. The crew have to walk to Electrical in this. */
+.deckDark {
+  filter: brightness(0.34) saturate(0.5);
+}
+.deckDark::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  background: radial-gradient(78% 66% at 50% 50%, transparent 0%, rgba(0, 0, 0, 0.72) 100%);
+  pointer-events: none;
+  z-index: 3;
+}
+.deckDark .roomHere {
+  /* Your own room keeps enough light to act in — the filter multiplies with
+     the deck's, so this lands a little under half normal brightness. */
+  filter: brightness(3.2);
 }
 
 .corridors {
@@ -30,46 +54,84 @@
   pointer-events: none;
 }
 .corridors line {
-  stroke: #262a44;
-  stroke-width: 10;
+  stroke: #2c3152;
+  stroke-width: 14;
   stroke-linecap: round;
 }
 
 .room {
+  /* Accent per room, overridden by [data-room] below. Everything else in here
+     is expressed in terms of it, so one line changes a room's whole look. */
+  --accent: #4a5170;
+
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   gap: 8px;
-  min-height: 96px;
-  padding: 10px;
+  min-height: 112px;
+  padding: 10px 10px 14px;
   border-radius: 10px;
-  border: 1px solid #24263a;
-  background: #12131f;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, #24263a);
+  /* Floor panelling, tinted by the room's accent — the single biggest thing
+     that stops six dark rectangles reading as six cards in a list. */
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 15px,
+      color-mix(in srgb, var(--accent) 7%, transparent) 15px 16px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 15px,
+      color-mix(in srgb, var(--accent) 7%, transparent) 15px 16px
+    ),
+    radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--accent) 14%, #12131f), #0f1019);
   color: #e8e9f3;
   font: inherit;
   cursor: default;
-  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+  overflow: hidden;
+  transition: border-color 0.15s, filter 0.15s, transform 0.1s;
 }
+
+/* Room signage, the way a ship labels a compartment. */
+.room::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 22%, transparent), transparent 45%);
+  pointer-events: none;
+}
+
+/* Scoped to .room deliberately: CSS Modules rejects a bare attribute selector
+   as impure, because it would leak out of this stylesheet. */
+.room[data-room="upper-engine"] { --accent: #7f8bff; }
+.room[data-room="cafeteria"]    { --accent: #f5c451; }
+.room[data-room="weapons"]      { --accent: #b78bff; }
+.room[data-room="electrical"]   { --accent: #4fd06a; }
+.room[data-room="medbay"]       { --accent: #35d9c4; }
+.room[data-room="reactor"]      { --accent: #ff7a45; }
 
 /* Rooms you can walk to: lit and clickable. */
 .roomOpen {
   cursor: pointer;
-  border-color: #2f3350;
-  background: #16182a;
+  filter: brightness(1.18);
 }
 .roomOpen:hover {
-  border-color: #35d9c4;
+  border-color: var(--accent);
   transform: translateY(-1px);
+  filter: brightness(1.35);
 }
 
-/* The room you're standing in. */
+/* The room you're standing in — lit from the floor up. */
 .roomHere {
-  border-color: #35d9c4;
-  background: #10241f;
-  box-shadow: inset 0 0 0 1px #1f6f63;
+  border-color: var(--accent);
+  filter: brightness(1.45);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent),
+    0 0 22px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 /* Out of reach this step — dimmed, not hidden, so the map stays legible. */
@@ -78,13 +140,23 @@
 }
 
 .roomName {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: #b9bbd4;
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 16%, #0c0d15);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--accent) 55%, #e8e9f3);
   text-align: center;
 }
-.roomHere .roomName { color: #e8e9f3; }
+.roomHere .roomName { color: #fff; }
 
 /* Marks a room holding one of *your* outstanding tasks. */
 .taskPip {
@@ -99,19 +171,37 @@
 }
 
 .dots {
+  position: relative;
+  z-index: 1;
   display: flex;
-  gap: 5px;
-  min-height: 18px;
-  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  align-items: flex-end;
   flex-wrap: wrap;
   justify-content: center;
 }
 
+/* Among Us crewmates are never quite still. A 2px idle bob over a long,
+   staggered cycle is enough to make a room read as occupied rather than as
+   an icon sitting in a box. */
+.dot {
+  display: inline-block;
+  animation: bob 2.6s ease-in-out infinite;
+}
+
+@keyframes bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2.5px); }
+}
+
 /* Marks which crewmate is you, without obscuring the sprite. */
 .dotMe {
-  display: inline-block;
   border-radius: 999px;
   box-shadow: 0 0 0 2px #ffffffcc;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot { animation: none; }
 }
 
 .goHint {
