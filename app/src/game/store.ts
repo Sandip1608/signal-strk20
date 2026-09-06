@@ -95,6 +95,11 @@ type Store = {
   send: (action: Record<string, unknown>) => Promise<void>;
 };
 
+/** Living non-impostors — the seats the shared crew bar counts. */
+function crewSeatsOf(game: GameState): number[] {
+  return game.seats.filter((x) => !x.dead && x.role !== "IMPOSTOR").map((x) => x.seat);
+}
+
 const HOST = "0xhost";
 
 /** The local host's secret seed. Module-scoped rather than stored in
@@ -222,7 +227,12 @@ export const useGame = create<Store>((set, get) => ({
     set({
       viewerSeat: null,
       revealed: false,
-      ship: g ? ship.initShip(g.seats.map((x) => x.seat), g.tasksPerPlayer) : null,
+      ship: g
+        ? ship.withCrewProgress(
+            ship.initShip(g.seats.map((x) => x.seat), g.tasksPerPlayer),
+            crewSeatsOf(g),
+          )
+        : null,
     });
   },
 
@@ -249,12 +259,11 @@ export const useGame = create<Store>((set, get) => ({
     set((st) => {
       if (!st.ship || !st.game) return {};
       const me = st.game.seats.find((x) => x.seat === seat);
-      return {
-        ship: ship.completeTask(st.ship, seat, taskId, {
-          isImpostor: me?.role === "IMPOSTOR",
-          living: st.game.seats.filter((x) => !x.dead).map((x) => x.seat),
-        }),
-      };
+      const next = ship.completeTask(st.ship, seat, taskId, {
+        isImpostor: me?.role === "IMPOSTOR",
+        living: st.game.seats.filter((x) => !x.dead).map((x) => x.seat),
+      });
+      return { ship: ship.withCrewProgress(next, crewSeatsOf(st.game)) };
     });
   },
 
@@ -276,6 +285,8 @@ export const useGame = create<Store>((set, get) => ({
       const s = engine.seatOf(g, seat);
       return engine.reportNightKill(g, s.sessionKey);
     });
+    const g2 = get().game;
+    set((st) => (st.ship && g2 ? { ship: ship.withCrewProgress(st.ship, crewSeatsOf(g2)) } : {}));
   },
 
   skipNight: () => {
@@ -292,11 +303,22 @@ export const useGame = create<Store>((set, get) => ({
       void get().send({ type: "endVote" });
       return;
     }
+    const pre = get();
+    if (pre.ship && ship.reactorBlown(pre.ship)) {
+      set({ error: "resolve the reactor" });
+      return;
+    }
     apply(set, (g) => engine.endVote(g));
     const g = get().game;
     set((st) =>
       st.ship && g
-        ? { ship: ship.resetForRound(st.ship, g.seats.map((x) => x.seat)) }
+        ? {
+            // A death changes who the crew are, so the bar's total moves too.
+            ship: ship.withCrewProgress(
+              ship.resetForRound(st.ship, g.seats.map((x) => x.seat)),
+              crewSeatsOf(g),
+            ),
+          }
         : {},
     );
   },
@@ -304,6 +326,13 @@ export const useGame = create<Store>((set, get) => ({
   callMeeting: (seat) => {
     if (get().mode === "online") {
       void get().send({ type: "callMeeting" });
+      return;
+    }
+    // Same guard as the contract and the relay: a meeting must not be a free
+    // way to delete a sabotage.
+    const st = get();
+    if (st.ship && ship.reactorGoing(st.ship)) {
+      set({ error: "fix the reactor first" });
       return;
     }
     apply(set, (g) => engine.callMeeting(g, seat));

@@ -29,7 +29,6 @@ import {
   neighbours,
   occupants,
   taskHere,
-  taskProgress,
   ventFrom,
   type RoomId,
   type ShipState,
@@ -123,13 +122,11 @@ export function ShipMap({
   const roomMates = occupants(ship, here, livingSeats).filter((x) => x !== me.seat);
   const task = taskHere(ship, me.seat);
   const myTasks = ship.tasks[me.seat] ?? [];
-  // The bar counts crew lists only; an impostor's fake tasks are not part of
-          // the crew's job.
-          const progress = taskProgress(
-            ship,
-            livingSeats,
-            isImpostor ? livingSeats.filter((x) => x !== me.seat) : undefined,
-          );
+  // One shared number, computed where every role is known. Working it out
+  // here gave each viewer a different denominator: crew counted the impostors'
+  // fake lists into a total that could never be reached, and an impostor
+  // excluded only itself.
+  const progress = ship.crewProgress;
 
   const active = myTasks.find((t) => t.id === openTask) ?? null;
 

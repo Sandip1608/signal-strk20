@@ -254,6 +254,16 @@ export type ShipState = {
    * contract would be taking someone's word for whether it was reached.
    */
   reactorDeadline: number;
+  /**
+   * The shared crew task bar.
+   *
+   * Precomputed rather than derived in the view, because only the server (or
+   * the local store) knows every role. Each client computing it from what it
+   * can see gave every viewer a different denominator — crew counted the
+   * impostors' fake lists into a total that could never be reached, and an
+   * impostor excluded only *itself*.
+   */
+  crewProgress: { done: number; total: number };
 };
 
 const DEFAULT_TASKS_PER_PLAYER = 3;
@@ -358,6 +368,7 @@ export function initShip(
     killReadyAt: now + KILL_COOLDOWN_SECS * 1000,
     lightsOutUntil: 0,
     reactorDeadline: 0,
+    crewProgress: { done: 0, total: 0 },
   };
 }
 
@@ -453,6 +464,25 @@ export function resetForRound(
   };
 }
 
+/**
+ * Recompute the shared crew bar. Call it wherever tasks or roles change.
+ *
+ * `crewSeats` is every living non-impostor. Only the store and the relay can
+ * supply that, which is exactly why the number lives on the state rather than
+ * being worked out in the view.
+ */
+export function withCrewProgress(ship: ShipState, crewSeats: number[]): ShipState {
+  let done = 0;
+  let total = 0;
+  for (const seat of crewSeats) {
+    for (const t of ship.tasks[seat] ?? []) {
+      total += 1;
+      if (t.done) done += 1;
+    }
+  }
+  return { ...ship, crewProgress: { done, total } };
+}
+
 /** Everyone (living) currently standing in `room`. */
 export function occupants(ship: ShipState, room: RoomId, living: number[]): number[] {
   return living.filter((seat) => ship.positions[seat] === room);
@@ -514,8 +544,12 @@ export function completeTask(
   );
   let next: ShipState = { ...ship, tasks: { ...ship.tasks, [seat]: mine } };
 
-  // A visual task is witnessed by whoever is standing there.
-  if (task?.visual && opts.living) {
+  // A visual task is witnessed by whoever is standing there — unless the
+  // lights are out (nobody can see it, exactly as `move` records no sighting
+  // in the dark) or the doer is a ghost (invisible, so being "witnessed"
+  // would out them).
+  const doerIsGhost = opts.living !== undefined && !opts.living.includes(seat);
+  if (task?.visual && opts.living && !lightsOut(ship, now) && !doerIsGhost) {
     const room = ship.positions[seat];
     const watchers = occupants(ship, room, opts.living).filter((x) => x !== seat);
     if (watchers.length > 0) {

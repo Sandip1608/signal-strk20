@@ -478,6 +478,11 @@ pub mod SignalRound {
         /// used to stall the round indefinitely.
         fn call_meeting(ref self: ContractState) {
             assert(self.phase.read() == phases::NIGHT, 'not night');
+            // A meeting used to be a free "delete the sabotage" button: it moved
+            // the phase to VOTE, `resolve_sabotage` only fired during NIGHT, and
+            // `end_vote` then wiped the deadline. Among Us blocks the emergency
+            // button during a sabotage for exactly this reason.
+            assert(self.reactor_deadline.read() == 0, 'fix the reactor first');
             let seat = self.seat_of_session_key(get_caller_address());
             assert(!self.dead.read(seat), 'dead cannot call');
             assert(!self.called_meeting.read(seat), 'meeting already used');
@@ -537,7 +542,10 @@ pub mod SignalRound {
         /// payout needs to know who won.
         fn resolve_sabotage(ref self: ContractState, host_seed: felt252, salt: felt252) {
             self.assert_host();
-            assert(self.phase.read() == phases::NIGHT, 'not night');
+            // NIGHT *or* VOTE: a body reported mid-meltdown must not strand the
+            // sabotage in a phase where it can never be resolved.
+            let phase = self.phase.read();
+            assert(phase == phases::NIGHT || phase == phases::VOTE, 'not in a round');
             let deadline = self.reactor_deadline.read();
             assert(deadline != 0, 'reactor is stable');
             assert(get_block_timestamp() > deadline, 'reactor not blown');
@@ -574,6 +582,13 @@ pub mod SignalRound {
             self.assert_host();
             assert(self.phase.read() == phases::VOTE, 'not in vote phase');
             assert(self.ballot_closed(), 'vote still open');
+
+            // A meltdown that already blew has to be resolved, not rounded
+            // past - otherwise ending the vote is another way to delete it.
+            let reactor = self.reactor_deadline.read();
+            assert(
+                reactor == 0 || get_block_timestamp() <= reactor, 'resolve the reactor',
+            );
 
             let round = self.round_number.read();
             assert(round + 1 < super::MAX_ROUNDS, 'too many rounds');
@@ -865,7 +880,15 @@ pub mod SignalRound {
             if get_block_timestamp() > self.vote_deadline.read() {
                 return true;
             }
-            let alive: u256 = self.living_count().into();
+            let alive_n = self.living_count();
+            // With nobody alive, "everyone has voted" is vacuously true, which
+            // is a confusing basis for closing a ballot - and the TypeScript
+            // mirror guards on it, so the two would disagree. The deadline
+            // still closes it.
+            if alive_n == 0 {
+                return false;
+            }
+            let alive: u256 = alive_n.into();
             self.total_votes_of.read(self.round_number.read()) >= alive
         }
 

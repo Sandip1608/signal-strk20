@@ -186,6 +186,41 @@ mod tests {
         assert(signal::round::REACTOR_SECS <= 120, 'window too long to matter');
     }
 
+    /// A meeting used to be a free "delete the sabotage" button: it moved the
+    /// phase to VOTE, resolve_sabotage only fired during NIGHT, and end_vote
+    /// then wiped the deadline. These pin the three guards that close it.
+    fn meeting_allowed(reactor_deadline: u64) -> bool {
+        reactor_deadline == 0
+    }
+    fn end_vote_allowed(now: u64, reactor_deadline: u64) -> bool {
+        reactor_deadline == 0 || now <= reactor_deadline
+    }
+
+    #[test]
+    fn no_meeting_while_the_reactor_is_going() {
+        assert(!meeting_allowed(500), 'meeting must be blocked');
+        assert(meeting_allowed(0), 'meeting fine when stable');
+    }
+
+    #[test]
+    fn cannot_round_past_a_blown_reactor() {
+        assert(!end_vote_allowed(501, 500), 'must resolve the meltdown');
+    }
+
+    #[test]
+    fn can_end_a_round_with_the_reactor_stable_or_still_fixable() {
+        assert(end_vote_allowed(999, 0), 'stable should pass');
+        assert(end_vote_allowed(400, 500), 'still fixable should pass');
+    }
+
+    /// The dodge is only fully closed if all three hold at once.
+    #[test]
+    fn the_meltdown_cannot_be_escaped() {
+        let live: u64 = 500;
+        assert(!meeting_allowed(live), 'meeting escape open');
+        assert(!end_vote_allowed(501, live), 'end_vote escape open');
+    }
+
     // ── closing the ballot early ──────────────────────────────────────────
 
     /// Mirrors the vote-count half of `ballot_closed()`.
@@ -214,6 +249,21 @@ mod tests {
     fn the_dead_are_not_waited_for() {
         // Five seats, one killed: four votes is everyone who can still vote.
         assert(everyone_voted(4, 4), 'should not wait on a corpse');
+    }
+
+    /// The Cairo and TypeScript versions must agree here, or a round could be
+    /// closable on one side and not the other.
+    #[test]
+    fn nobody_alive_does_not_close_the_ballot() {
+        assert(!everyone_voted_guarded(0, 0), 'zero voters must not close');
+    }
+
+    fn everyone_voted_guarded(total_weight: u256, alive: u32) -> bool {
+        if alive == 0 {
+            return false;
+        }
+        let alive_u: u256 = alive.into();
+        total_weight >= alive_u
     }
 
     #[test]

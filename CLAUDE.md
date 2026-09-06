@@ -261,6 +261,32 @@ task list, and three hand-rolled minigames — wire matching, a keypad, and
 a timing gauge. No canvas, no game library; the only per-frame animation is
 the gauge needle inside its own modal.
 
+**Reactor guards live in three places, and must stay in all three.** The
+meltdown was fully escapable: `call_meeting` moved the phase to VOTE,
+`resolve_sabotage` only fired during NIGHT, and `end_vote` then wiped the
+deadline — so any crew member could delete a sabotage by pressing a button.
+Closed by blocking a meeting while the reactor is going, letting
+`resolve_sabotage` fire in NIGHT *or* VOTE (so a body report cannot strand it),
+and refusing `end_vote` while it has blown.
+
+The guard **cannot live in `engine.ts`**, which only sees `GameState` — the
+reactor is ship state. So it is enforced in the Cairo, in `server/rooms.ts` and
+in `store.ts`. Fixing only the contract left the relay wide open, and the live
+check still said "ALLOWED" until all three were done.
+
+**Nothing is witnessed in the dark, and ghosts are never witnessed.**
+`completeTask` suppresses visual sightings when `lightsOut` (matching `move`,
+which already did) and when the doer is dead. The task still completes — only
+the witnessing is suppressed.
+
+**The crew task bar is one shared number on `ShipState`.** It used to be
+derived per viewer, and since a client only knows its own role, crew counted
+the impostors' fake lists into a total that could never be reached while an
+impostor excluded only itself — every player saw a different denominator.
+`withCrewProgress` recomputes it wherever roles or tasks change (start of
+night, task completed, body reported, round boundary), and the relay ships it
+in the redacted view.
+
 **Impostor task lists are fake.** `completeTask` takes `isImpostor` and
 returns the ship untouched for them: the panel opens and plays (looking busy is
 the disguise) but nothing completes, the shared bar does not move, and the

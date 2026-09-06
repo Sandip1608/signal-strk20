@@ -64,6 +64,11 @@ type Store = { rooms: Map<string, Room> };
 const g = globalThis as unknown as { __signalRooms?: Store };
 const store: Store = (g.__signalRooms ??= { rooms: new Map() });
 
+/** Living non-impostors — the seats the shared crew bar counts. */
+function crewSeatsOf(game: GameState): number[] {
+  return game.seats.filter((x) => !x.dead && x.role !== "IMPOSTOR").map((x) => x.seat);
+}
+
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no I/O/0/1
 const ROOM_TTL_MS = 3 * 60 * 60 * 1000;
 const BOT_INTERVAL_MS = 800;
@@ -207,9 +212,9 @@ export function applyAction(room: Room, action: Action): void {
 
     case "startNight":
       room.game = engine.startNight(g0);
-      room.ship = ship.initShip(
-        room.game.seats.map((s) => s.seat),
-        room.game.tasksPerPlayer,
+      room.ship = ship.withCrewProgress(
+        ship.initShip(room.game.seats.map((s) => s.seat), room.game.tasksPerPlayer),
+        crewSeatsOf(room.game),
       );
       break;
 
@@ -227,10 +232,13 @@ export function applyAction(room: Room, action: Action): void {
     case "task":
       if (room.ship) {
         const me = g0.seats.find((x) => x.seat === action.seat);
-        room.ship = ship.completeTask(room.ship, action.seat, action.taskId, {
-          isImpostor: me?.role === "IMPOSTOR",
-          living: g0.seats.filter((x) => !x.dead).map((x) => x.seat),
-        });
+        room.ship = ship.withCrewProgress(
+          ship.completeTask(room.ship, action.seat, action.taskId, {
+            isImpostor: me?.role === "IMPOSTOR",
+            living: g0.seats.filter((x) => !x.dead).map((x) => x.seat),
+          }),
+          crewSeatsOf(room.game),
+        );
       }
       break;
 
@@ -240,6 +248,12 @@ export function applyAction(room: Room, action: Action): void {
       break;
 
     case "callMeeting":
+      // Mirrors the Cairo guard. It cannot live in `engine.ts`, which only
+      // sees GameState — the reactor is ship state — so it has to be enforced
+      // here and in the store, wherever both halves are in scope.
+      if (room.ship && ship.reactorGoing(room.ship)) {
+        throw new engine.ContractError("fix the reactor first");
+      }
       room.game = engine.callMeeting(g0, action.seat);
       break;
 
@@ -265,6 +279,8 @@ export function applyAction(room: Room, action: Action): void {
 
     case "report":
       room.game = engine.reportNightKill(g0, engine.seatOf(g0, action.seat).sessionKey);
+      // A death changes who the crew are, so the shared total moves with it.
+      if (room.ship) room.ship = ship.withCrewProgress(room.ship, crewSeatsOf(room.game));
       break;
 
     case "skipNight":
@@ -272,11 +288,15 @@ export function applyAction(room: Room, action: Action): void {
       break;
 
     case "endVote":
+      // A blown reactor must be resolved, not rounded past.
+      if (room.ship && ship.reactorBlown(room.ship)) {
+        throw new engine.ContractError("resolve the reactor");
+      }
       room.game = engine.endVote(g0);
       if (room.ship) {
-        room.ship = ship.resetForRound(
-          room.ship,
-          room.game.seats.map((x) => x.seat),
+        room.ship = ship.withCrewProgress(
+          ship.resetForRound(room.ship, room.game.seats.map((x) => x.seat)),
+          crewSeatsOf(room.game),
         );
       }
       break;
@@ -404,6 +424,7 @@ export function viewFor(room: Room, seat: number | null): ViewerState {
       // Everyone must see the meltdown - it is the one thing the whole crew
       // has to react to at once.
       reactorDeadline: room.ship.reactorDeadline,
+      crewProgress: room.ship.crewProgress,
       positions,
       // Task lists are sent in full, deliberately. They carry no role
       // information — the impostor gets a list too — and the shared crew
