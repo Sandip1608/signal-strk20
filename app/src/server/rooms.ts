@@ -54,6 +54,12 @@ export type Room = {
   version: number;
   /** playerId -> seat, so a browser reclaims its seat after a refresh. */
   claims: Record<string, number>;
+  /**
+   * The player who opened the room. Host-only actions are `assert_host` in the
+   * Cairo and were completely unguarded here, so any joined player could
+   * re-assign roles, start the night or resolve the game.
+   */
+  hostPlayerId: string | null;
   lastBotAt: number;
   lastTouchedAt: number;
 };
@@ -117,6 +123,7 @@ export function createRoom(opts: {
     hostSeed,
     version: 1,
     claims: {},
+    hostPlayerId: null,
     lastBotAt: 0,
     lastTouchedAt: Date.now(),
   };
@@ -144,10 +151,10 @@ export type Action =
   | { type: "endVote" }
   | { type: "callMeeting"; seat: number }
   | { type: "vent"; seat: number }
-  | { type: "sabotageLights" }
-  | { type: "sabotageReactor" }
-  | { type: "fixReactor" }
-  | { type: "fixLights" }
+  | { type: "sabotageLights"; seat: number }
+  | { type: "sabotageReactor"; seat: number }
+  | { type: "fixReactor"; seat: number }
+  | { type: "fixLights"; seat: number }
   | { type: "vote"; seat: number; candidate: number }
   | { type: "resolve" }
   | { type: "payout" };
@@ -172,6 +179,8 @@ export function applyAction(room: Room, action: Action): void {
         entropy: randomEntropy(),
       });
       room.claims[action.playerId] = room.game.seats.length - 1;
+      // First through the door hosts it.
+      room.hostPlayerId ??= action.playerId;
       break;
     }
 
@@ -242,10 +251,21 @@ export function applyAction(room: Room, action: Action): void {
       }
       break;
 
-    case "kill":
+    case "kill": {
+      // Every one of these was enforced only by hiding the button. Over the
+      // relay a second client can simply POST, so the server has to check.
+      const killer = g0.seats.find((x) => x.seat === action.seat);
+      if (!killer || killer.dead) throw new engine.ContractError("dead cannot kill");
+      if (killer.role !== "IMPOSTOR") throw new engine.ContractError("only an impostor kills");
+      if (!room.ship) throw new engine.ContractError("no deck");
+      if (!ship.killReady(room.ship)) throw new engine.ContractError("kill on cooldown");
+      if (room.ship.positions[action.seat] !== room.ship.positions[action.victim]) {
+        throw new engine.ContractError("not in the same room");
+      }
       room.game = engine.privateKill(g0, action.victim);
-      if (room.ship) room.ship = ship.armKillCooldown(room.ship);
+      room.ship = ship.armKillCooldown(room.ship);
       break;
+    }
 
     case "callMeeting":
       // Mirrors the Cairo guard. It cannot live in `engine.ts`, which only
@@ -257,23 +277,34 @@ export function applyAction(room: Room, action: Action): void {
       room.game = engine.callMeeting(g0, action.seat);
       break;
 
-    case "vent":
+    case "vent": {
+      // Venting leaves no sighting, so crew doing it is free untraceable
+      // teleportation.
+      const who = g0.seats.find((x) => x.seat === action.seat);
+      if (who?.role !== "IMPOSTOR") throw new engine.ContractError("only an impostor vents");
+      if (who.dead) throw new engine.ContractError("dead cannot vent");
       if (room.ship) room.ship = ship.vent(room.ship, action.seat);
       break;
+    }
 
     case "sabotageLights":
+      requireImpostor(room, action.seat);
       if (room.ship) room.ship = ship.sabotageLights(room.ship);
       break;
 
     case "sabotageReactor":
+      requireImpostor(room, action.seat);
       if (room.ship) room.ship = ship.sabotageReactor(room.ship);
       break;
 
     case "fixReactor":
+      // The whole point of the meltdown is that somebody has to walk there.
+      requireIn(room, action.seat, "reactor");
       if (room.ship) room.ship = ship.fixReactor(room.ship);
       break;
 
     case "fixLights":
+      requireIn(room, action.seat, "electrical");
       if (room.ship) room.ship = ship.fixLights(room.ship);
       break;
 
@@ -324,6 +355,39 @@ export function applyAction(room: Room, action: Action): void {
 
   room.version += 1;
   room.lastTouchedAt = Date.now();
+}
+
+/** Only an impostor may sabotage. */
+function requireImpostor(room: Room, seat: number): void {
+  const who = room.game.seats.find((x) => x.seat === seat);
+  if (who?.role !== "IMPOSTOR") throw new engine.ContractError("only an impostor sabotages");
+  if (who.dead) throw new engine.ContractError("dead cannot sabotage");
+}
+
+/** You must actually be standing there to fix it. */
+function requireIn(room: Room, seat: number, roomId: RoomId): void {
+  const who = room.game.seats.find((x) => x.seat === seat);
+  if (!who || who.dead) throw new engine.ContractError("dead cannot fix");
+  if (!room.ship || room.ship.positions[seat] !== roomId) {
+    throw new engine.ContractError("you are not there");
+  }
+}
+
+/** Host-only actions, mirroring `assert_host` in the Cairo. */
+export const HOST_ONLY = [
+  "addBot",
+  "assignRoles",
+  "startNight",
+  "endVote",
+  "skipNight",
+  "resolve",
+  "payout",
+];
+
+export function isHost(room: Room, playerId: string | null): boolean {
+  // Before anyone has joined there is no host yet, so the first join is let
+  // through; after that only the room's opener.
+  return room.hostPlayerId === null || room.hostPlayerId === playerId;
 }
 
 const BOT_NAMES = ["Nova", "Rhea", "Juno", "Atlas", "Vega", "Orion", "Lyra"];
@@ -442,6 +506,11 @@ export function viewFor(room: Room, seat: number | null): ViewerState {
     game: {
       ...room.game,
       seats,
+      // Only the victim knows a note arrived. Broadcasting it told the whole
+      // table who had been hit before they reported — which is exactly what
+      // `report_night_kill` exists to keep private.
+      pendingVictim:
+        seat !== null && room.game.pendingVictim === seat + 1 ? room.game.pendingVictim : 0,
       // The team and the salt are the commitment's preimage: releasing either
       // early would let a client compute who is hidden before the reveal.
       hiddenSeats: revealed ? room.game.hiddenSeats : [],

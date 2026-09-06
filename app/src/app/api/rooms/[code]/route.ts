@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { ContractError } from "@/game/engine";
 import {
+  HOST_ONLY,
   applyAction,
   getRoom,
+  isHost,
   jsonSafe,
   seatOfPlayer,
   tickBots,
@@ -50,7 +52,28 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
   // Seat-bound actions are taken from the server's claim table, never from the
   // client — otherwise anyone could post a vote as somebody else's seat.
   const claimed = seatOfPlayer(room, action.playerId ?? null);
-  const seatBound = ["seeRole", "move", "task", "kill", "report", "vote", "callMeeting", "vent"];
+  // Host-only actions are `assert_host` on-chain and were unguarded here, so
+  // any joined player could re-assign roles or resolve the game.
+  if (HOST_ONLY.includes(action.type) && !isHost(room, action.playerId ?? null)) {
+    return NextResponse.json({ error: "only the host" }, { status: 403 });
+  }
+
+  const seatBound = [
+    "seeRole",
+    "move",
+    "task",
+    "kill",
+    "report",
+    "vote",
+    "callMeeting",
+    "vent",
+    // Sabotage and repair are seat-bound too: the server checks the caller's
+    // role and where they are standing.
+    "sabotageLights",
+    "sabotageReactor",
+    "fixLights",
+    "fixReactor",
+  ];
   if (seatBound.includes(action.type)) {
     if (claimed === null) {
       return NextResponse.json({ error: "not seated in this room" }, { status: 403 });

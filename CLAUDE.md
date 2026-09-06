@@ -261,6 +261,29 @@ task list, and three hand-rolled minigames — wire matching, a keypad, and
 a timing gauge. No canvas, no game library; the only per-frame animation is
 the gauge needle inside its own modal.
 
+**The server must enforce every rule the UI hides.** This was the largest
+class of bug in the project. The engine was written for pass-the-device play,
+where there is no second client to lie, and the relay was added without
+revisiting that trust boundary. `seatBound` correctly bound a seat to its
+claim, which stopped impersonation — and that one obvious hole being closed
+hid the shape of the rest:
+
+- **Kill** checked only that the victim was alive. Role, co-location and
+  cooldown were enforced *only* by hiding the button, so any player could
+  `POST {type:"kill"}` and murder anyone from any room on the first second.
+- **Host-only actions** (`assignRoles`, `startNight`, `endVote`, `skipNight`,
+  `resolve`, `payout`, `addBot`) are `assert_host` in the Cairo and were
+  entirely unguarded here. `hostPlayerId` is now set by the first join and
+  checked in the route.
+- **Sabotage and repair** checked nothing: crew could sabotage, and anyone
+  could fix the reactor without walking there — which is the entire pressure.
+- **Vent** had no role check, giving crew free untraceable teleportation.
+- **`pendingVictim`** was broadcast, so the whole table saw who had been hit
+  before they reported. It is now redacted to the victim alone.
+
+When adding an action, ask what stops a hand-written POST — not what the UI
+shows.
+
 **Reactor guards live in three places, and must stay in all three.** The
 meltdown was fully escapable: `call_meeting` moved the phase to VOTE,
 `resolve_sabotage` only fired during NIGHT, and `end_vote` then wiped the
