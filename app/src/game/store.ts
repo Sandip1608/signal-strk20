@@ -570,5 +570,24 @@ export const useGame = create<Store>((set, get) => ({
   },
 }));
 
+/**
+ * The seat this screen belongs to, or null if the screen is shared.
+ *
+ * Online it is your own seat — there is no device to pass. Locally it is the
+ * only human at the table, if there is exactly one; a solo game against bots
+ * has nobody to hide from either. Two or more humans on one screen returns
+ * null, which is the genuine hot seat the pass-the-device gate exists for.
+ */
+export function ownDeviceSeat(
+  game: GameState | null,
+  mode: "local" | "online",
+  mySeat: number | null,
+): number | null {
+  if (!game) return null;
+  if (mode === "online") return mySeat;
+  const humans = game.seats.filter((x) => !x.isBot);
+  return humans.length === 1 ? humans[0].seat : null;
+}
+
 /** Convenience selectors. */
 export const selectPhase = (s: Store) => s.game?.phase ?? Phase.LOBBY;

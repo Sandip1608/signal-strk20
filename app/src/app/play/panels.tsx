@@ -13,7 +13,7 @@ import { DeviceGate, KeyValue, Tally, useDeadline } from "./ui";
 import { ShipMap } from "./ship/ShipMap";
 import { CrewCard } from "./ship/Crewmate";
 import { Ejection } from "./ship/Ejection";
-import { useGame } from "@/game/store";
+import { ownDeviceSeat, useGame } from "@/game/store";
 import { ROOM_BY_ID, sightingsFor, tasksComplete } from "@/game/ship";
 import { ballotClosed, livingSeats, short } from "@/game/engine";
 import { SKIP_VOTE, type GameState, type Seat } from "@/game/types";
@@ -114,16 +114,18 @@ export function LobbyPanel({ game }: { game: GameState }) {
 // ── Roles ──────────────────────────────────────────────────────────────────
 
 export function RolePanel({ game }: { game: GameState }) {
-  const { viewerSeat, revealed, setViewer, reveal, cover, seeRole, startNight, mode } = useGame();
-  const online = mode === "online";
+  const { viewerSeat, revealed, setViewer, reveal, cover, seeRole, startNight, mode, mySeat } =
+    useGame();
+  const pinned = ownDeviceSeat(game, mode, mySeat) !== null;
 
   const pending = game.seats.filter((x) => !x.roleSeen);
   const allSeen = pending.length === 0;
-  // Online the viewer is permanently pinned to your own seat (no device to
-  // pass), so "have you looked yet" is what decides the card-vs-roster view —
-  // otherwise the card would never clear and Start night could never appear.
+  // When the screen belongs to one player the viewer is permanently pinned to
+  // their seat (there is no device to pass), so "have you looked yet" is what
+  // decides the card-vs-roster view — otherwise the card would never clear and
+  // Start night could never appear.
   const raw = viewerSeat === null ? null : game.seats.find((x) => x.seat === viewerSeat);
-  const viewer = raw && raw.roleSeen && online ? null : raw;
+  const viewer = raw && raw.roleSeen && pinned ? null : raw;
 
   if (viewer && !revealed) {
     return (
@@ -178,7 +180,7 @@ export function RolePanel({ game }: { game: GameState }) {
       <p className={s.panelHint}>
         The host drew the impostor and posted <code>poseidon(impostor_seat, salt)</code> on-chain.
         That binds the draw — the host cannot re-pick after seeing the vote — without revealing it.
-        {online
+        {mode === "online"
           ? " Waiting for everyone to open their own note on their own device."
           : " Each player now opens their own encrypted note."}
       </p>
@@ -222,10 +224,37 @@ export function NightPanel({ game }: { game: GameState }) {
   const {
     viewerSeat, revealed, setViewer, reveal, cover, kill, report, skipNight,
     ship, moveTo, completeTask, mode, callMeeting, useVent, sabotageLights, fixLights,
-    sabotageReactor, fixReactor, investigate,
+    sabotageReactor, fixReactor, investigate, mySeat,
   } = useGame();
   const online = mode === "online";
+  const own = ownDeviceSeat(game, mode, mySeat);
   const nightOver = useDeadline(game.nightDeadline);
+
+  // The ejection that ended the previous round. `endVote` goes straight back to
+  // NIGHT, so without this the airlock beat only ever existed as a line in the
+  // activity log — you were simply dead, or someone else was, with no scene.
+  const lastRound = game.roundNumber - 1;
+  const [watchedBreak, setWatchedBreak] = useState(-1);
+  const breakDue = game.roundNumber > 0 && watchedBreak < game.roundNumber;
+  const ejectedLast = game.ejections[lastRound] ?? 0;
+
+  if (breakDue) {
+    const who = ejectedLast === 0 ? null : game.seats[ejectedLast - 1];
+    return (
+      <div className={s.panel}>
+        <h2 className={s.panelTitle}>Round {lastRound + 1} — the airlock</h2>
+        <Ejection
+          ejected={who ? { seat: who.seat, name: who.name } : null}
+          caught={game.ejectedWasImpostor[lastRound] ?? false}
+          hiddenLabelSingular={IMPOSTOR_NAME}
+          tied={ejectedLast === 0}
+          confirmEjects={game.confirmEjects}
+          final={null}
+          onDone={() => setWatchedBreak(game.roundNumber)}
+        />
+      </div>
+    );
+  }
 
   const viewer = viewerSeat === null ? null : game.seats.find((x) => x.seat === viewerSeat);
   // Read from `pendingVictim` rather than component state: a bot impostor kills
@@ -236,7 +265,7 @@ export function NightPanel({ game }: { game: GameState }) {
 
   // The victim self-reports with their session key; that call is what opens the
   // vote. Until then the contract knows nothing about the kill.
-  if (victim && !victim.dead) {
+  if (victim && !victim.dead && (own === null || victim.seat === own)) {
     return (
       <div className={s.panel}>
         <h2 className={s.panelTitle}>A note arrived</h2>
@@ -333,7 +362,8 @@ export function NightPanel({ game }: { game: GameState }) {
           <p className={s.panelHint}>The deck is not ready.</p>
         )}
 
-        {!online && (
+        {/* Nothing to hide from when the screen has one owner. */}
+        {own === null && (
           <div className={s.btnRow}>
             <button type="button" className={`${s.btn} ${s.btnGhost}`} onClick={cover}>
               Hide and pass on
@@ -389,9 +419,10 @@ export function NightPanel({ game }: { game: GameState }) {
 // ── Vote ───────────────────────────────────────────────────────────────────
 
 export function VotePanel({ game }: { game: GameState }) {
-  const { viewerSeat, revealed, setViewer, reveal, cover, vote, resolve, ship, mode, endVote } =
+  const { viewerSeat, revealed, setViewer, reveal, cover, vote, resolve, ship, mode, endVote, mySeat } =
     useGame();
   const online = mode === "online";
+  const pinned = ownDeviceSeat(game, mode, mySeat) !== null;
   const deadline = useDeadline(game.voteDeadline);
   // Either the clock ran out, or everyone has voted — no reason to sit and
   // watch a timer nobody is still using.
@@ -404,9 +435,10 @@ export function VotePanel({ game }: { game: GameState }) {
   const living = livingSeats(game);
   const toVote = living.filter((x) => !x.hasVoted);
   const rawViewer = viewerSeat === null ? null : game.seats.find((x) => x.seat === viewerSeat);
-  // Same reason as the role card: online, having voted (or being dead) is what
-  // returns you to the tally, since the viewer never clears on its own.
-  const viewer = rawViewer && online && (rawViewer.hasVoted || rawViewer.dead) ? null : rawViewer;
+  // Same reason as the role card: on a screen pinned to one player, having
+  // voted (or being dead) is what returns you to the tally, since the viewer
+  // never clears on its own.
+  const viewer = rawViewer && pinned && (rawViewer.hasVoted || rawViewer.dead) ? null : rawViewer;
 
   if (viewer && !revealed) {
     return (
@@ -638,12 +670,11 @@ export function ResolvedPanel({ game }: { game: GameState }) {
     <div className={s.panel}>
       <Ejection
         ejected={ejected ? { seat: ejected.seat, name: ejected.name } : null}
-        hiddenSeats={hidden}
-        hiddenNames={hiddenSeatObjs.map((x) => x.name)}
+        caught={ejected !== undefined && hidden.includes(ejected.seat)}
         hiddenLabelSingular={IMPOSTOR_NAME}
-        crewWon={game.crewWon}
         tied={game.ejected === 0}
         confirmEjects={game.confirmEjects}
+        final={{ crewWon: game.crewWon, teamNames: hiddenSeatObjs.map((x) => x.name) }}
       />
 
       <div className={s.crewRow}>

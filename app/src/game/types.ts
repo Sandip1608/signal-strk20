@@ -139,6 +139,16 @@ export type GameState = {
   roundNumber: number;
   /** round -> `seat + 1` ejected that round; 0 = nobody. */
   ejections: Record<number, number>;
+  /**
+   * round -> was the player ejected that round an impostor.
+   *
+   * Among Us's "Confirm Ejects". This is a *deliberate* public disclosure —
+   * the whole point of the setting is that the table is told — which is why it
+   * can live in mirrored state and be broadcast to everyone without redaction.
+   * It never names the role, only guilty or not, and it is filled only when
+   * `confirmEjects` is on and somebody was actually ejected.
+   */
+  ejectedWasImpostor: Record<number, boolean>;
   /** `seat + 1`; 0 = nobody died this round. */
   nightVictim: number;
   /**

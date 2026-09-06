@@ -21,6 +21,7 @@ import { LobbyPanel, NightPanel, ResolvedPanel, RolePanel, VotePanel } from "./p
 import { useGame } from "@/game/store";
 import { useBotDriver } from "@/game/useBotDriver";
 import { useRoomSync } from "@/game/useRoomSync";
+import { useOwnDevice } from "@/game/useOwnDevice";
 import { Phase, type GameState } from "@/game/types";
 import {
   DEFAULT_SETTINGS,
@@ -64,6 +65,9 @@ export default function PlayPage() {
   // once for everybody, or every client would fight over the same bot turn.
   useBotDriver({ enabled: mode === "local" });
   useRoomSync();
+  // One human at the table? Then the deck is theirs — open it without making
+  // them tap through a gate meant for a shared screen.
+  useOwnDevice();
 
   return (
     <div className={s.shell}>

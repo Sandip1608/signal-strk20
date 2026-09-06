@@ -91,6 +91,7 @@ export function createGame(opts: {
     voteDeadline: 0,
     roundNumber: 0,
     ejections: {},
+    ejectedWasImpostor: {},
     nightVictim: NO_SEAT,
     pendingVictim: NO_SEAT,
     tallies: {},
@@ -489,6 +490,15 @@ export function endVote(state: GameState, now = Date.now()): GameState {
       ...state,
       seats,
       ejections: { ...state.ejections, [round]: ejected },
+      // Computed here because this is the last place roles are in hand; the
+      // relay redacts them, so the client could not work it out for itself.
+      ejectedWasImpostor:
+        state.confirmEjects && ejected !== NO_SEAT
+          ? {
+              ...state.ejectedWasImpostor,
+              [round]: state.seats[ejected - 1].role === "IMPOSTOR",
+            }
+          : state.ejectedWasImpostor,
       roundNumber: round + 1,
       tallies: {},
       skipTally: 0n,
