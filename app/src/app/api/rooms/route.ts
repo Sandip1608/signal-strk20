@@ -12,6 +12,7 @@ export async function POST(req: Request) {
     minPlayers?: number;
     maxPlayers?: number;
     hiddenCount?: number;
+    seerCount?: number;
     tasksPerPlayer?: number;
     confirmEjects?: boolean;
   };
@@ -22,6 +23,7 @@ export async function POST(req: Request) {
     minPlayers: body.minPlayers,
     maxPlayers: body.maxPlayers,
     hiddenCount: body.hiddenCount,
+    seerCount: body.seerCount,
     tasksPerPlayer: body.tasksPerPlayer,
     confirmEjects: body.confirmEjects,
   });

@@ -332,6 +332,49 @@ mod tests {
         assert(signal::round::MAX_ROUNDS <= 20, 'cap should bound a stall');
     }
 
+    // ── the seer shares the impostors' seed ───────────────────────────────
+
+    use signal::round::draw_seats;
+
+    /// The whole point of continuing one Fisher-Yates sequence: drawing an
+    /// extra seat for the seer must not disturb which seats became impostors.
+    /// If this ever fails, adding a seer silently re-rolls the game.
+    #[test]
+    fn drawing_a_seer_does_not_move_the_impostors() {
+        let c = seed(31337);
+        let just_impostors = draw_seats(c, 9, 2);
+        let with_a_seer = draw_seats(c, 9, 3);
+        assert(*just_impostors.at(0) == *with_a_seer.at(0), 'impostor 0 moved');
+        assert(*just_impostors.at(1) == *with_a_seer.at(1), 'impostor 1 moved');
+    }
+
+    #[test]
+    fn the_seer_is_never_an_impostor() {
+        let c = seed(4242);
+        let all = draw_seats(c, 8, 3); // 2 impostors + 1 seer
+        let seer = *all.at(2);
+        assert(seer != *all.at(0), 'seer is impostor 0');
+        assert(seer != *all.at(1), 'seer is impostor 1');
+    }
+
+    #[test]
+    fn a_seer_draw_stays_in_range() {
+        let all = draw_seats(seed(11), 6, 3);
+        let mut i: u32 = 0;
+        while i != all.len() {
+            assert(*all.at(i) < 6, 'seat out of range');
+            i += 1;
+        }
+    }
+
+    /// `derive_hidden` is now a wrapper over `draw_seats`; it must still sort.
+    #[test]
+    fn derive_hidden_still_sorts_its_draw() {
+        let h = derive_hidden(seed(555), 12, 3);
+        assert(*h.at(0) < *h.at(1), 'not ascending 0 1');
+        assert(*h.at(1) < *h.at(2), 'not ascending 1 2');
+    }
+
     // ── cross-language parity ─────────────────────────────────────────────
 
     /// These exact seat lists were produced by the TypeScript mirror in
@@ -358,6 +401,25 @@ mod tests {
         let d = derive_hidden(seed(7), 5, 2);
         assert(*d.at(0) == 1, 'ts parity d0');
         assert(*d.at(1) == 2, 'ts parity d1');
+    }
+
+    /// The seer split, pinned to what `deriveRoles` in `crypto.ts` returns for
+    /// the same seed. Asserting only that "the first k picks are stable" would
+    /// pass even if both languages drifted together; these are the literal
+    /// seats the TypeScript printed.
+    #[test]
+    fn the_seer_split_matches_the_typescript_mirror() {
+        let c = seed(42);
+        let two = draw_seats(c, 9, 2);
+        assert(*two.at(0) == 3, 'ts seer two0');
+        assert(*two.at(1) == 2, 'ts seer two1');
+
+        let three = draw_seats(c, 9, 3);
+        assert(*three.at(0) == 3, 'ts seer three0');
+        assert(*three.at(1) == 2, 'ts seer three1');
+        // hidden = {2, 3}, seer = 8 — the impostors are untouched by the extra
+        // draw, which is the property the whole split exists for.
+        assert(*three.at(2) == 8, 'ts seer three2');
     }
 
     // ── the commitment the contract checks ────────────────────────────────

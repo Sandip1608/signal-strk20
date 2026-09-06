@@ -39,7 +39,7 @@ export const NO_SEAT = 0;
  * Fascist, Minion of Mordred) comes from the variant config, so the engine
  * only ever reasons about hidden-vs-not.
  */
-export type Role = "CREW" | "IMPOSTOR";
+export type Role = "CREW" | "IMPOSTOR" | "SEER";
 
 /**
  * One seat. `wallet` is the lobby-join address that shielded the buy-in;
@@ -77,6 +77,16 @@ export type Seat = {
   hasVoted: boolean;
   /** One emergency meeting per player per round. */
   calledMeeting: boolean;
+  /**
+   * What this seat has investigated: target seat -> was an impostor.
+   *
+   * Private to the seer — the relay redacts it for everyone else, the same way
+   * it redacts roles. Cumulative: a seer who cleared someone in round 1 would
+   * still remember it in round 3, so the record should not be wiped either.
+   */
+  checks: Record<number, boolean>;
+  /** `roundNumber` of the last check; -1 for none. Enforces one per night. */
+  checkedRound: number;
 };
 
 export type GameState = {
@@ -88,6 +98,8 @@ export type GameState = {
   minPlayers: number;
   maxPlayers: number;
   hiddenCount: number;
+  /** Investigative crew. Drawn from the same committed seed as the impostors. */
+  seerCount: number;
   /**
    * Client-side round settings. Neither exists on-chain: the contract has no
    * concept of a task, and "confirm ejects" is purely how the reveal is
@@ -111,6 +123,8 @@ export type GameState = {
    * without a canonical order a team would have many valid preimages.
    */
   hiddenSeats: number[];
+  /** Revealed with the rest at resolve. */
+  seerSeats: number[];
   salt: string;
   /** Host-only until `resolve_round` reveals it. */
   hostSeed: string;

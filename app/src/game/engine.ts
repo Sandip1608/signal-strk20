@@ -48,6 +48,7 @@ export function createGame(opts: {
   minPlayers?: number;
   maxPlayers?: number;
   hiddenCount?: number;
+  seerCount?: number;
   tasksPerPlayer?: number;
   confirmEjects?: boolean;
   seedCommitment?: string;
@@ -64,6 +65,8 @@ export function createGame(opts: {
   require_(minPlayers <= maxPlayers, "min above max");
   require_(hiddenCount >= 1, "need a hidden team");
   require_(hiddenCount * 2 < minPlayers, "hidden team too large");
+  const seerCount = opts.seerCount ?? 0;
+  require_(hiddenCount + seerCount < minPlayers, "too many special roles");
 
   return {
     host: opts.host,
@@ -72,12 +75,14 @@ export function createGame(opts: {
     minPlayers,
     maxPlayers,
     hiddenCount,
+    seerCount,
     tasksPerPlayer: opts.tasksPerPlayer ?? 3,
     confirmEjects: opts.confirmEjects ?? true,
     seats: [],
     seedCommitment: opts.seedCommitment ?? "",
     roleCommitment: "",
     hiddenSeats: [],
+    seerSeats: [],
     salt: "",
     hostSeed: "",
     nightDurationSecs: opts.nightDurationSecs,
@@ -148,6 +153,8 @@ export function join(
     roleSeen: false,
     hasVoted: false,
     calledMeeting: false,
+    checks: {},
+    checkedRound: -1,
   };
 
   return log(
@@ -169,7 +176,7 @@ export function join(
  */
 export function assignRoles(
   state: GameState,
-  p: { hiddenSeats: number[]; salt: string; commitment: string },
+  p: { hiddenSeats: number[]; seerSeats?: number[]; salt: string; commitment: string },
 ): GameState {
   require_(state.phase === Phase.LOBBY, "not in lobby");
   require_(state.seats.length >= state.minPlayers, "not enough players");
@@ -180,9 +187,14 @@ export function assignRoles(
   }
 
   const hidden = new Set(p.hiddenSeats);
+  const seers = new Set(p.seerSeats ?? []);
   const seats = state.seats.map((s) => ({
     ...s,
-    role: (hidden.has(s.seat) ? "IMPOSTOR" : "CREW") as Seat["role"],
+    role: (hidden.has(s.seat)
+      ? "IMPOSTOR"
+      : seers.has(s.seat)
+        ? "SEER"
+        : "CREW") as Seat["role"],
     roleSeen: false,
   }));
 
@@ -192,6 +204,7 @@ export function assignRoles(
       seats,
       roleCommitment: p.commitment,
       hiddenSeats: [...p.hiddenSeats].sort((a, b) => a - b),
+      seerSeats: [...(p.seerSeats ?? [])].sort((a, b) => a - b),
       salt: p.salt,
       phase: Phase.ASSIGNED,
     },
@@ -237,6 +250,49 @@ export function privateKill(state: GameState, victimSeat: number): GameState {
     {
       call: "pool: private_transfer",
       text: "Kill note transferred privately inside the pool — sender and recipient hidden.",
+      private: true,
+    },
+  );
+}
+
+/**
+ * A seer check.
+ *
+ * Like the night kill, this is a private action with no on-chain call: the
+ * contract learns nothing, and the result is knowledge held by one player.
+ * One check per night, so it cannot be used to sweep the table.
+ */
+export function investigate(
+  state: GameState,
+  seerSeat: number,
+  targetSeat: number,
+): GameState {
+  require_(state.phase === Phase.NIGHT, "not night");
+  const seer = seatOf(state, seerSeat);
+  require_(seer.role === "SEER", "not the seer");
+  require_(!seer.dead, "dead cannot check");
+  require_(seer.checkedRound !== state.roundNumber, "already checked tonight");
+  require_(targetSeat !== seerSeat, "cannot check yourself");
+  const target = seatOf(state, targetSeat);
+  require_(!target.dead, "target is dead");
+
+  const isImpostor = target.role === "IMPOSTOR";
+  return log(
+    {
+      ...state,
+      seats: state.seats.map((s) =>
+        s.seat === seerSeat
+          ? {
+              ...s,
+              checks: { ...s.checks, [targetSeat]: isImpostor },
+              checkedRound: state.roundNumber,
+            }
+          : s,
+      ),
+    },
+    {
+      call: "pool: private_transfer",
+      text: "A check note moved privately inside the pool — only the seer reads the answer.",
       private: true,
     },
   );
@@ -422,6 +478,9 @@ export function endVote(state: GameState, now = Date.now()): GameState {
     ...x,
     dead: x.dead || (ejected !== NO_SEAT && x.seat === ejected - 1),
     hasVoted: false,
+    // `checks` is deliberately NOT cleared — the seer remembers what they
+    // learned. The one-per-night limit is `checkedRound` against the new
+    // round, so a fresh check unlocks on its own.
   }));
 
   const round = state.roundNumber;

@@ -73,12 +73,24 @@ export function combinedSeed(hostSeed: string, entropies: string[]): string {
  * test rather than quietly making every round unopenable at `resolve_round`.
  */
 export function deriveHidden(combined: string, n: number, k: number): number[] {
-  if (k > n) throw new Error("k above n");
+  return drawSeats(combined, n, k).sort((a, b) => a - b);
+}
+
+/**
+ * Mirror of `round.cairo::draw_seats` — `count` distinct seats in *draw order*.
+ *
+ * Split from `deriveHidden` so several roles come off one seed: drawing
+ * `k + s` continues the same sequence, so the first `k` picks are identical to
+ * drawing `k` alone. That is what lets a seer be added without changing who
+ * the impostors are, and a Cairo test asserts exactly that.
+ */
+export function drawSeats(combined: string, n: number, count: number): number[] {
+  if (count > n) throw new Error("k above n");
 
   const pool = Array.from({ length: n }, (_, i) => i);
   const chosen: number[] = [];
 
-  for (let t = 0; t < k; t += 1) {
+  for (let t = 0; t < count; t += 1) {
     const r = BigInt(num.toHex(hash.computePoseidonHashOnElements([combined, num.toHex(t)])));
     const remaining = BigInt(n - t);
     const idx = Number(r % remaining);
@@ -87,7 +99,21 @@ export function deriveHidden(combined: string, n: number, k: number): number[] {
     pool[idx] = pool[n - t - 1];
   }
 
-  return chosen.sort((a, b) => a - b);
+  return chosen;
+}
+
+/** Deal every special role from one draw: impostors first, then seer(s). */
+export function deriveRoles(
+  combined: string,
+  n: number,
+  hiddenCount: number,
+  seerCount: number,
+): { hidden: number[]; seers: number[] } {
+  const all = drawSeats(combined, n, hiddenCount + seerCount);
+  return {
+    hidden: all.slice(0, hiddenCount).sort((a, b) => a - b),
+    seers: all.slice(hiddenCount).sort((a, b) => a - b),
+  };
 }
 
 /** A fresh random felt, used as the commitment salt. */

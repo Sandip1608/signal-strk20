@@ -80,6 +80,12 @@ export function chooseVote(state: GameState, voter: Seat): number | null {
   const candidates = others(state, voter.seat);
   if (candidates.length === 0) return null;
 
+  // A bot seer votes what it knows. Without this the role is dead weight
+  // whenever the seed hands it to a bot, which at 1 seer in 6 seats is most
+  // of the time in a solo game.
+  const guilty = candidates.find((x) => voter.checks[x.seat] === true);
+  if (guilty) return guilty.seat;
+
   const BANDWAGON = 0.75;
 
   // Last voter, top currently tied: break it. A tie ejects nobody and hands the
@@ -108,7 +114,8 @@ export type BotAction =
   | { kind: "report"; seat: number }
   | { kind: "vote"; voter: number; candidate: number }
   | { kind: "move"; seat: number; to: RoomId }
-  | { kind: "task"; seat: number; taskId: string };
+  | { kind: "task"; seat: number; taskId: string }
+  | { kind: "check"; seer: number; target: number };
 
 export function nextBotAction(state: GameState): BotAction | null {
   switch (state.phase) {
@@ -183,14 +190,27 @@ export function nextNightAction(state: GameState, ship: ShipState): BotAction | 
     }
   }
 
-  // 3. Standing on an unfinished task: do it.
+  // 3. A bot seer spends its one check on whoever it is standing with.
+  const seer = living.find(
+    (x) => x.isBot && x.role === "SEER" && x.checkedRound !== state.roundNumber,
+  );
+  if (seer && elapsed > 0.2) {
+    const room = ship.positions[seer.seat];
+    const near = occupants(ship, room, livingSeatNos)
+      .filter((x) => x !== seer.seat)
+      // No point spending the night re-reading someone already known.
+      .filter((x) => !(x in seer.checks));
+    if (near.length > 0) return { kind: "check", seer: seer.seat, target: pick(near)! };
+  }
+
+  // 4. Standing on an unfinished task: do it.
   const worker = living.find((x) => x.isBot && taskHere(ship, x.seat) !== null);
   if (worker) {
     const t = taskHere(ship, worker.seat)!;
     return { kind: "task", seat: worker.seat, taskId: t.id };
   }
 
-  // 4. Otherwise somebody walks.
+  // 5. Otherwise somebody walks.
   const walkers = living.filter((x) => x.isBot);
   const walker = pick(walkers);
   if (!walker) return null;

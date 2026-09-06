@@ -22,7 +22,18 @@ use core::dict::{Felt252Dict, Felt252DictTrait};
 /// Free function, not a contract method, so it can be unit-tested directly
 /// without spinning up contract state.
 pub fn derive_hidden(combined: felt252, n: u32, k: u32) -> Array<u32> {
-    assert(k <= n, 'k above n');
+    sort_ascending(draw_seats(combined, n, k))
+}
+
+/// Draw `count` distinct seats in draw order.
+///
+/// Split out from `derive_hidden` so several roles can be dealt from one seed:
+/// drawing `k + s` continues the same Fisher-Yates sequence, so the first `k`
+/// picks are byte-identical to drawing `k` alone. That is what lets a seer be
+/// added without changing which seats become impostors — and it keeps the
+/// TypeScript parity test valid.
+pub fn draw_seats(combined: felt252, n: u32, count: u32) -> Array<u32> {
+    assert(count <= n, 'k above n');
 
     // pool[i] = i, then swap-remove as we draw.
     let mut pool: Felt252Dict<u32> = Default::default();
@@ -34,7 +45,7 @@ pub fn derive_hidden(combined: felt252, n: u32, k: u32) -> Array<u32> {
 
     let mut chosen: Array<u32> = array![];
     let mut t: u32 = 0;
-    while t != k {
+    while t != count {
         let r = core::poseidon::poseidon_hash_span(array![combined, t.into()].span());
         let r_u256: u256 = r.into();
         let remaining: u32 = n - t;
@@ -47,8 +58,12 @@ pub fn derive_hidden(combined: felt252, n: u32, k: u32) -> Array<u32> {
         t += 1;
     }
     pool.squash();
+    chosen
+}
 
-    sort_ascending(chosen)
+/// Public wrapper so the contract can sort a partial draw.
+pub fn sort_ascending_pub(xs: Array<u32>) -> Array<u32> {
+    sort_ascending(xs)
 }
 
 /// Selection sort. `k` is at most a handful of seats, so this is fine and is
@@ -151,6 +166,10 @@ pub mod SignalRound {
         min_players: u32,
         max_players: u32,
         hidden_count: u32,
+        /// Investigative crew members. The RFP names night actions as
+        /// "impostor kills, seer checks", so the seer is drawn from the same
+        /// committed seed as the impostors rather than picked by the host.
+        seer_count: u32,
         // -- lobby --
         player_count: u32,
         seats: Map<u32, ContractAddress>, // seat -> lobby-join wallet
@@ -194,6 +213,7 @@ pub mod SignalRound {
         ejected: u32, // seat + 1, 0 = tie / nobody ejected
         impostor: u32, // first hidden seat + 1, revealed at resolve
         hidden: Map<u32, bool>, // seat -> on the hidden team, filled at resolve
+        seer: Map<u32, bool>, // seat -> is the seer, filled at resolve
         crew_won: bool,
     }
 
@@ -289,6 +309,7 @@ pub mod SignalRound {
         min_players: u32,
         max_players: u32,
         hidden_count: u32,
+        seer_count: u32,
         night_duration: u64,
         vote_duration: u64,
     ) {
@@ -300,6 +321,8 @@ pub mod SignalRound {
         assert(hidden_count >= 1, 'need a hidden team');
         // Strict minority: 2 * hidden < min_players.
         assert(hidden_count * 2 < min_players, 'hidden team too large');
+        // Every role has to fit on the smallest legal table.
+        assert(hidden_count + seer_count < min_players, 'too many special roles');
 
         self.host.write(host);
         self.seed_commitment.write(seed_commitment);
@@ -307,6 +330,7 @@ pub mod SignalRound {
         self.min_players.write(min_players);
         self.max_players.write(max_players);
         self.hidden_count.write(hidden_count);
+        self.seer_count.write(seer_count);
         self.night_duration.write(night_duration);
         self.vote_duration.write(vote_duration);
     }
@@ -550,7 +574,12 @@ pub mod SignalRound {
             assert(deadline != 0, 'reactor is stable');
             assert(get_block_timestamp() > deadline, 'reactor not blown');
 
-            let hidden_seats = self.open_roles(host_seed, salt);
+            let (hidden_seats, seer_seats) = self.open_roles(host_seed, salt);
+            let mut sx: u32 = 0;
+            while sx != seer_seats.len() {
+                self.seer.write(*seer_seats.at(sx), true);
+                sx += 1;
+            }
             let mut j: u32 = 0;
             while j != hidden_seats.len() {
                 self.hidden.write(*hidden_seats.at(j), true);
@@ -649,7 +678,12 @@ pub mod SignalRound {
 
             // Shared with `resolve_sabotage` - two copies of a reveal is how
             // the two paths quietly drift apart.
-            let hidden_seats = self.open_roles(host_seed, salt);
+            let (hidden_seats, seer_seats) = self.open_roles(host_seed, salt);
+            let mut sx: u32 = 0;
+            while sx != seer_seats.len() {
+                self.seer.write(*seer_seats.at(sx), true);
+                sx += 1;
+            }
 
             let mut j: u32 = 0;
             while j != hidden_seats.len() {
@@ -792,6 +826,15 @@ pub mod SignalRound {
             self.hidden_count.read()
         }
 
+        fn seer_count(self: @ContractState) -> u32 {
+            self.seer_count.read()
+        }
+
+        /// Only meaningful once resolved; false before then.
+        fn is_seer(self: @ContractState, seat: u32) -> bool {
+            self.seer.read(seat)
+        }
+
         fn seed_commitment(self: @ContractState) -> felt252 {
             self.seed_commitment.read()
         }
@@ -823,7 +866,7 @@ pub mod SignalRound {
         /// happen one way.
         fn open_roles(
             self: @ContractState, host_seed: felt252, salt: felt252,
-        ) -> Span<u32> {
+        ) -> (Span<u32>, Span<u32>) {
             assert(
                 poseidon_hash_span(array![host_seed].span()) == self.seed_commitment.read(),
                 'seed mismatch',
@@ -837,7 +880,18 @@ pub mod SignalRound {
                 mix.append(self.entropy.read(e));
                 e += 1;
             }
-            let hidden_seats = super::derive_hidden(poseidon_hash_span(mix.span()), n, k).span();
+            let seers = self.seer_count.read();
+            // One draw for every role: the first `k` picks are the impostors,
+            // the next `seers` are the seer(s). Continuing the same sequence
+            // means adding a seer cannot change who the impostors are.
+            let all = super::draw_seats(poseidon_hash_span(mix.span()), n, k + seers);
+            let mut hidden_only: Array<u32> = array![];
+            let mut d: u32 = 0;
+            while d != k {
+                hidden_only.append(*all.at(d));
+                d += 1;
+            }
+            let hidden_seats = super::sort_ascending_pub(hidden_only).span();
 
             let mut data: Array<felt252> = array![];
             let mut i: u32 = 0;
@@ -850,7 +904,14 @@ pub mod SignalRound {
                 poseidon_hash_span(data.span()) == self.role_commitment.read(),
                 'commitment mismatch',
             );
-            hidden_seats
+            let mut seer_seats: Array<u32> = array![];
+            let mut q: u32 = k;
+            while q != k + seers {
+                seer_seats.append(*all.at(q));
+                q += 1;
+            }
+
+            (hidden_seats, seer_seats.span())
         }
 
         fn living_count(self: @ContractState) -> u32 {
@@ -972,6 +1033,8 @@ pub trait ISignalRoundGame<T> {
     fn min_players(self: @T) -> u32;
     fn max_players(self: @T) -> u32;
     fn hidden_count(self: @T) -> u32;
+    fn seer_count(self: @T) -> u32;
+    fn is_seer(self: @T, seat: u32) -> bool;
     fn seed_commitment(self: @T) -> felt252;
     fn entropy_of(self: @T, seat: u32) -> felt252;
     fn is_hidden(self: @T, seat: u32) -> bool;

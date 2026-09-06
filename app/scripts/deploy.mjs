@@ -64,6 +64,9 @@ const VOTE_SECS = Number(process.env.VOTE_SECS ?? 240);
 const MIN_PLAYERS = Number(process.env.MIN_PLAYERS ?? 5);
 const MAX_PLAYERS = Number(process.env.MAX_PLAYERS ?? 15);
 const HIDDEN_COUNT = Number(process.env.HIDDEN_COUNT ?? 1);
+// The RFP's investigative role. 0 is vanilla Among Us; the constructor asserts
+// `hidden_count + seer_count < min_players`.
+const SEER_COUNT = Number(process.env.SEER_COUNT ?? 0);
 const POT_NOTE_ID =
   process.env.POT_NOTE_ID || num.toHex(`0x${encode.buf2hex(ec.starkCurve.utils.randomPrivateKey())}`);
 
@@ -100,7 +103,9 @@ console.log("Signal — deploy\n");
 console.log(`  network    ${NETWORK}`);
 console.log(`  rpc        ${RPC}`);
 console.log(`  pool       ${POOL ?? "(none - SignalEscrow will be skipped)"}`);
-console.log(`  players    ${MIN_PLAYERS}-${MAX_PLAYERS}, hidden team ${HIDDEN_COUNT}`);
+console.log(
+  `  players    ${MIN_PLAYERS}-${MAX_PLAYERS}, hidden team ${HIDDEN_COUNT}, seers ${SEER_COUNT}`,
+);
 console.log(`  timers     night ${NIGHT_SECS}s / vote ${VOTE_SECS}s`);
 console.log(`  pot note   ${POT_NOTE_ID}`);
 console.log(`  seed commit ${SEED_COMMITMENT}`);
@@ -110,7 +115,7 @@ console.log(`  SignalEscrow class ${hash.computeContractClassHash(escrow.sierra)
 if (DRY) {
   console.log("Dry run. Plan:");
   console.log("  1. declare SignalRound            -> tx #1");
-  console.log("  2. deploy  SignalRound(host, seed_commit, min, max, hidden, night, vote) -> tx #2");
+  console.log("  2. deploy  SignalRound(host, seed_commit, min, max, hidden, seer, night, vote) -> tx #2");
   if (POOL) {
     console.log("  3. declare SignalEscrow           -> tx #3");
     console.log("  4. deploy  SignalEscrow(pool, round, pot_note) -> tx #4");
@@ -157,6 +162,7 @@ const roundDep = await account.deployContract({
     String(MIN_PLAYERS),
     String(MAX_PLAYERS),
     String(HIDDEN_COUNT),
+    String(SEER_COUNT),
     String(NIGHT_SECS),
     String(VOTE_SECS),
   ],

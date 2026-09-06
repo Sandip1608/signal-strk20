@@ -19,10 +19,11 @@ prove.
 
 | | Status |
 |---|---|
-| Cairo contracts (`SignalRound`, `SignalEscrow`) | compile; 14 unit tests pass |
+| Cairo contracts (`SignalRound`, `SignalEscrow`) | compile; 46 unit tests pass |
 | Provably-fair role assignment from a multi-party seed | **done, on-chain** |
+| Night actions — impostor kills **and seer checks** | **done** (simulated, see below) |
 | Turn progression + resolution | **done, on-chain** |
-| Variants as contract configuration | **done** — 5 presets |
+| Host-tweakable settings as contract configuration | **done** |
 | Playable game (2D deck, tasks, voting, ejection) | **done** |
 | Cross-device play | **done**, via a relay (caveat below) |
 | Deployment to Starknet | **not yet** |
@@ -57,6 +58,15 @@ combined     = poseidon(host_seed, entropy_0, …, entropy_n-1)
 hidden_seats = derive_hidden(combined, players, hidden_count)   // ascending
 ```
 
+Every special role comes off that one draw. `draw_seats` returns picks in draw
+order and `derive_hidden` is just `sort(draw_seats(…))`, so drawing
+`hidden_count + seer_count` seats *continues the same Fisher-Yates sequence* —
+the first `hidden_count` picks are byte-identical to drawing the impostors
+alone. Turning the seer on therefore cannot re-roll who the impostors are.
+`contracts/src/tests.cairo::drawing_a_seer_does_not_move_the_impostors` asserts
+exactly that, and `the_seer_split_matches_the_typescript_mirror` pins both
+halves to the literal seats the TypeScript produces.
+
 Neither side steers the draw alone, and anyone can recompute it from public
 chain state plus the revealed seed.
 
@@ -66,24 +76,42 @@ in Cairo and in TypeScript — kept honest by a test:
 seat lists the TS mirror produces. A drift in poseidon padding or felt→u256
 conversion fails a test instead of silently making every round unopenable.
 
-## Variants, as contract configuration
+## The seer
 
-`SignalRound`'s constructor takes `min_players`, `max_players` and
-`hidden_count`, so one contract covers the family:
+The RFP names night actions as *"impostor kills, seer checks"*, so there is an
+investigative role — off by default, since vanilla Among Us has none (the
+closest thing is the Sheriff from The Other Roles mod).
 
-| Variant | Players | Hidden |
-|---|---|---|
-| Among Us | 5–15 | 1 impostor |
-| One Night Werewolf | 5–10 | 2 werewolves |
-| Secret Hitler | 5–10 | 2 fascists |
-| Avalon | 5–10 | 2 minions |
-| Blood on the Clocktower | 7–15 | 3 evil |
+A seer is drawn from the same committed seed as the impostors, never picked by
+the host. Once per night they may check one player standing **in the same
+room** and learn whether that player is an impostor. Co-location is deliberate:
+it costs them the tasks they did not do instead, and it keeps the seer a
+presence on the deck rather than a lobby-wide oracle.
 
-**Be precise about this claim.** What generalises is the shared skeleton —
-hidden minority, private night action, anonymous vote — which is exactly what
-the RFP identifies as the common core. Each variant plays its hidden-role
-elimination round. It does **not** implement Secret Hitler's policy deck,
-Avalon's quests or Clocktower's characters.
+The result is private the same way a role is. `Seat.checks` is redacted for
+every viewer but its owner — and so is `checkedRound`, because a non-negative
+value there would name the seer as surely as the role field would. Checks are
+cumulative across rounds: a seer who cleared someone in round 1 still has it in
+round 3, and the one-per-night limit is enforced against the round number
+rather than by wiping what they learned.
+
+## Configuration, not variants
+
+`SignalRound`'s constructor takes `min_players`, `max_players`, `hidden_count`
+and `seer_count`, so the host tunes the table without a fork.
+
+This used to advertise five variants — Among Us, One Night Werewolf, Secret
+Hitler, Avalon, Blood on the Clocktower. That was dropped on purpose. Measured,
+three of the five were byte-identical configurations differing only in
+vocabulary, and worse, Avalon and Secret Hitler have **no night kill at all**
+(Avalon is quests, Secret Hitler is policy cards) — so modelling them as
+"hidden team kills someone at night" misrepresented the games they were named
+after. Claiming one game that is actually implemented beats claiming five where
+two are wrong.
+
+The generalisation the RFP asks about is still real and still in the contract:
+another hidden-role game is a different constructor call, not a fork. It is
+simply not dressed up as five menu entries.
 
 ## Play it
 
@@ -95,8 +123,10 @@ npm run dev          # http://localhost:3000/play
 
 No API key or wallet needed — `/play` runs entirely locally.
 
-**Solo** — pick a variant, hit **New round**, add your name, **Fill with bots**.
-Bots walk the deck, do tasks, kill and vote on their own.
+**Solo** — set the table, hit **New round**, add your name, **Fill with bots**.
+Bots walk the deck, do tasks, kill and vote on their own — and a bot that draws
+the seer spends its check and votes what it learned, so the role is not dead
+weight in a solo game.
 
 **Same room** — everyone shares one screen; each player taps their own crewmate
 to reveal their role behind a cover screen.
@@ -167,7 +197,7 @@ include `SignalEscrow`.
 contracts/src/
   round.cairo          state machine + derive_hidden; zero pool coupling
   signal_escrow.cairo  the only pool-facing surface; stateless between calls
-  tests.cairo          14 unit tests
+  tests.cairo          46 unit tests
 app/src/
   game/                engine (mirrors the contract), ship, bots, crypto
   server/rooms.ts      cross-device relay, redacted per viewer

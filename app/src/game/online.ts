@@ -44,6 +44,7 @@ export async function createRoom(opts: {
   minPlayers?: number;
   maxPlayers?: number;
   hiddenCount?: number;
+  seerCount?: number;
   tasksPerPlayer?: number;
   confirmEjects?: boolean;
 }): Promise<string> {

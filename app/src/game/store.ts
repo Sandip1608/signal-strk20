@@ -17,7 +17,7 @@ import { create } from "zustand";
 import * as engine from "./engine";
 import {
   combinedSeed,
-  deriveHidden,
+  deriveRoles,
   generateSessionKey,
   placeholderPayoutNote,
   placeholderWallet,
@@ -56,7 +56,7 @@ type Store = {
   mySeat: number | null;
   connecting: boolean;
 
-  newGame: (opts: { nightDurationSecs: number; voteDurationSecs: number; variantKey?: string; minPlayers?: number; maxPlayers?: number; hiddenCount?: number }) => void;
+  newGame: (opts: RoundOpts) => void;
   resetGame: () => void;
 
   addPlayer: (name: string, isBot?: boolean) => void;
@@ -69,6 +69,7 @@ type Store = {
   skipNight: () => void;
   endVote: () => void;
   callMeeting: (seat: number) => void;
+  investigate: (seat: number, target: number) => void;
   useVent: (seat: number) => void;
   sabotageLights: () => void;
   sabotageReactor: () => void;
@@ -88,11 +89,29 @@ type Store = {
   seeRole: (seat: number) => void;
   clearError: () => void;
 
-  hostRoom: (name: string, opts: { nightDurationSecs: number; voteDurationSecs: number; variantKey?: string; minPlayers?: number; maxPlayers?: number; hiddenCount?: number }) => Promise<void>;
+  hostRoom: (name: string, opts: RoundOpts) => Promise<void>;
   joinRoom: (code: string, name: string) => Promise<void>;
   leaveRoom: () => void;
   applyView: (view: online.RoomView) => void;
   send: (action: Record<string, unknown>) => Promise<void>;
+};
+
+/**
+ * What the host picks on the start screen.
+ *
+ * Named rather than inlined twice: `newGame` and `hostRoom` take the same
+ * object, and the local and relay paths drifting apart is exactly how the
+ * seer setting would get silently dropped on one of them.
+ */
+export type RoundOpts = {
+  nightDurationSecs: number;
+  voteDurationSecs: number;
+  minPlayers?: number;
+  maxPlayers?: number;
+  hiddenCount?: number;
+  seerCount?: number;
+  tasksPerPlayer?: number;
+  confirmEjects?: boolean;
 };
 
 /** Living non-impostors — the seats the shared crew bar counts. */
@@ -210,10 +229,19 @@ export const useGame = create<Store>((set, get) => ({
               hostSeedRef.current,
               g.seats.map((s) => s.entropy),
             );
-            const hiddenSeats = deriveHidden(combined, g.seats.length, g.hiddenCount);
-            const salt = randomSalt();
+    // Impostors and seer come off one draw, so adding a seer cannot change
+    // who the impostors are.
+    const { hidden: hiddenSeats, seers } = deriveRoles(
+      combined,
+      g.seats.length,
+      g.hiddenCount,
+      g.seerCount,
+    );
+    const salt = randomSalt();
     const commitment = poseidonCommitment(hiddenSeats, salt);
-    apply(set, (s) => engine.assignRoles(s, { hiddenSeats, salt, commitment }));
+    apply(set, (s) =>
+      engine.assignRoles(s, { hiddenSeats, seerSeats: seers, salt, commitment }),
+    );
     set({ viewerSeat: null, revealed: false });
   },
 
@@ -338,6 +366,14 @@ export const useGame = create<Store>((set, get) => ({
     apply(set, (g) => engine.callMeeting(g, seat));
   },
 
+  investigate: (seat, target) => {
+    if (get().mode === "online") {
+      void get().send({ type: "investigate", target });
+      return;
+    }
+    apply(set, (g) => engine.investigate(g, seat, target));
+  },
+
   useVent: (seat) => {
     if (get().mode === "online") {
       void get().send({ type: "vent" });
@@ -434,6 +470,8 @@ export const useGame = create<Store>((set, get) => ({
           return engine.markRoleSeen(g, action.seat);
         case "kill":
           return engine.privateKill(g, action.victim);
+        case "check":
+          return engine.investigate(g, action.seer, action.target);
         case "report":
           return engine.reportNightKill(g, engine.seatOf(g, action.seat).sessionKey);
         case "vote":

@@ -153,7 +153,9 @@ export function RolePanel({ game }: { game: GameState }) {
           <p className={s.roleBlurb}>
             {impostor
               ? "Tonight you transfer the kill note to one player, privately, inside the pool. Nobody sees the sender — not even the round contract."
-              : "Survive the night, then vote out the impostor. Your vote is anonymous; only the tally is public."}
+              : viewer.role === "SEER"
+                ? "You are crew, but once each night you may check one player and learn whether they are an impostor. The answer is yours alone — the table only hears it if you say it."
+                : "Survive the night, then vote out the impostor. Your vote is anonymous; only the tally is public."}
           </p>
         </div>
         <button
@@ -220,7 +222,7 @@ export function NightPanel({ game }: { game: GameState }) {
   const {
     viewerSeat, revealed, setViewer, reveal, cover, kill, report, skipNight,
     ship, moveTo, completeTask, mode, callMeeting, useVent, sabotageLights, fixLights,
-    sabotageReactor, fixReactor,
+    sabotageReactor, fixReactor, investigate,
   } = useGame();
   const online = mode === "online";
   const nightOver = useDeadline(game.nightDeadline);
@@ -312,6 +314,12 @@ export function NightPanel({ game }: { game: GameState }) {
               kill(victim);
               cover();
             }}
+            onInvestigate={(target) => investigate(viewer.seat, target)}
+            canCheck={
+              viewer.role === "SEER" &&
+              !viewer.dead &&
+              viewer.checkedRound !== game.roundNumber
+            }
             onVent={() => useVent(viewer.seat)}
             onSabotage={sabotageLights}
             onFixLights={fixLights}
@@ -433,7 +441,15 @@ export function VotePanel({ game }: { game: GameState }) {
                 seat={x.seat}
                 name={x.name}
                 onClick={() => vote(viewer.seat, x.seat)}
-                tag="vote to eject"
+                // Only a seer ever has a check to show — everyone else's copy
+                // is redacted to `{}` before it leaves the server.
+                tag={
+                  x.seat in viewer.checks
+                    ? viewer.checks[x.seat]
+                      ? "you checked — IMPOSTOR"
+                      : "you checked — clear"
+                    : "vote to eject"
+                }
               />
             ))}
         </div>
@@ -687,6 +703,12 @@ export function ResolvedPanel({ game }: { game: GameState }) {
             k={`${impostorLabel(game.hiddenCount)} seat${game.hiddenCount === 1 ? "" : "s"}`}
             v={hidden.join(", ")}
           />
+          {game.seerCount > 0 && (
+            <KeyValue
+              k={`Seer seat${game.seerCount === 1 ? "" : "s"}`}
+              v={game.seerSeats.join(", ") || "—"}
+            />
+          )}
           <KeyValue k="Total votes" v={String(game.totalVotes)} />
           <KeyValue
             k="Winners"

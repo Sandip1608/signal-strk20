@@ -468,3 +468,45 @@
   border-radius: 999px;
   padding: 2px 7px;
 }
+
+/* ── the seer ───────────────────────────────────────────────────────── */
+
+/* Deliberately not red or purple: a check is neither a kill nor a vent, and
+   the seer should not read as an impostor ability at a glance. */
+.check {
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 10px;
+  border: 1px solid #4a6ad0;
+  background: #1d2650;
+  color: #cfd9ff;
+  font: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: filter 0.15s, transform 0.08s;
+}
+.check:hover { filter: brightness(1.15); }
+.check:active { transform: scale(0.985); }
+
+.checkList {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid #33407a;
+  background: #151b36;
+}
+.checkList li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12.5px;
+}
+.checkGuilty { color: #ff9aa6; }
+.checkGuilty .taskTick { color: #ff4d5e; }
+.checkClear { color: #9fb2e8; }
+.checkClear .taskTick { color: #35d9c4; }

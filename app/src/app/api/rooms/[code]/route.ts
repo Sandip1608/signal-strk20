@@ -66,6 +66,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
     "report",
     "vote",
     "callMeeting",
+    // A check is signed by the seer's own seat, never a seat they name.
+    "investigate",
     "vent",
     // Sabotage and repair are seat-bound too: the server checks the caller's
     // role and where they are standing.

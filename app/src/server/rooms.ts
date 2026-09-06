@@ -30,7 +30,7 @@ import * as ship from "@/game/ship";
 import { nextBotAction, nextNightAction } from "@/game/bots";
 import {
   combinedSeed,
-  deriveHidden,
+  deriveRoles,
   generateSessionKey,
   placeholderPayoutNote,
   placeholderWallet,
@@ -103,6 +103,7 @@ export function createRoom(opts: {
   minPlayers?: number;
   maxPlayers?: number;
   hiddenCount?: number;
+  seerCount?: number;
   tasksPerPlayer?: number;
   confirmEjects?: boolean;
 }): Room {
@@ -150,6 +151,7 @@ export type Action =
   | { type: "skipNight" }
   | { type: "endVote" }
   | { type: "callMeeting"; seat: number }
+  | { type: "investigate"; seat: number; target: number }
   | { type: "vent"; seat: number }
   | { type: "sabotageLights"; seat: number }
   | { type: "sabotageReactor"; seat: number }
@@ -203,10 +205,16 @@ export function applyAction(room: Room, action: Action): void {
         room.hostSeed,
         g0.seats.map((s) => s.entropy),
       );
-      const hiddenSeats = deriveHidden(combined, g0.seats.length, g0.hiddenCount);
+      const { hidden: hiddenSeats, seers } = deriveRoles(
+        combined,
+        g0.seats.length,
+        g0.hiddenCount,
+        g0.seerCount,
+      );
       const salt = randomSalt();
       room.game = engine.assignRoles(g0, {
         hiddenSeats,
+        seerSeats: seers,
         salt,
         commitment: poseidonCommitment(hiddenSeats, salt),
       });
@@ -264,6 +272,23 @@ export function applyAction(room: Room, action: Action): void {
       }
       room.game = engine.privateKill(g0, action.victim);
       room.ship = ship.armKillCooldown(room.ship);
+      break;
+    }
+
+    case "investigate": {
+      // Co-located, like the kill: a seer has to walk to the person they want
+      // to read, which costs them the tasks they did not do instead. The
+      // engine cannot check this itself — positions are ship state, not
+      // `GameState` — so the guard has to live here.
+      if (!room.ship) throw new engine.ContractError("no deck");
+      // Role first, position second: otherwise a crewmate who tries this is
+      // told "not in the same room", which is true but not the reason.
+      const asker = g0.seats.find((x) => x.seat === action.seat);
+      if (asker?.role !== "SEER") throw new engine.ContractError("not the seer");
+      if (room.ship.positions[action.seat] !== room.ship.positions[action.target]) {
+        throw new engine.ContractError("not in the same room");
+      }
+      room.game = engine.investigate(g0, action.seat, action.target);
       break;
     }
 
@@ -436,6 +461,9 @@ export function tickBots(room: Room): void {
       case "task":
         applyAction(room, { type: "task", seat: action.seat, taskId: action.taskId });
         break;
+      case "check":
+        applyAction(room, { type: "investigate", seat: action.seer, target: action.target });
+        break;
     }
   } catch {
     // A bot racing a human (both voting the same tick) can lose; skip the beat.
@@ -468,6 +496,12 @@ export function viewFor(room: Room, seat: number | null): ViewerState {
       ...s,
       role: mine || revealed ? s.role : undefined,
       sessionPrivateKey: mine ? s.sessionPrivateKey : "",
+      // A check result is knowledge one player had to spend their night
+      // earning. Shipping it to the table would hand everyone the answer.
+      checks: mine ? s.checks : {},
+      // A non-negative `checkedRound` only ever belongs to a seer, so leaving
+      // it public would name them as surely as the role field would.
+      checkedRound: mine ? s.checkedRound : -1,
       // The public key is fine to share — it is what `report_night_kill` is
       // signed by and appears on-chain anyway.
     };
@@ -514,6 +548,7 @@ export function viewFor(room: Room, seat: number | null): ViewerState {
       // The team and the salt are the commitment's preimage: releasing either
       // early would let a client compute who is hidden before the reveal.
       hiddenSeats: revealed ? room.game.hiddenSeats : [],
+      seerSeats: revealed ? room.game.seerSeats : [],
       salt: revealed ? room.game.salt : "",
     },
     ship: shipView,

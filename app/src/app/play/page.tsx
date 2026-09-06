@@ -188,6 +188,7 @@ type RoundConfig = {
   minPlayers: number;
   maxPlayers: number;
   hiddenCount: number;
+  seerCount: number;
   tasksPerPlayer: number;
   confirmEjects: boolean;
 };
@@ -266,6 +267,7 @@ function StartScreen({
     minPlayers,
     maxPlayers: settings.maxPlayers,
     hiddenCount: settings.impostors,
+    seerCount: settings.seer ? 1 : 0,
     tasksPerPlayer: settings.tasksPerPlayer,
     confirmEjects: settings.confirmEjects,
   };
@@ -323,6 +325,26 @@ One round aboard the ship. Roles are encrypted notes only their holder can decry
             max={MAX_TASKS}
             onChange={(n) => set({ tasksPerPlayer: n })}
           />
+
+          <div className={s.setting}>
+            <span className={s.settingLabel}>
+              Seer
+              <span className={s.settingHint}>
+                {settings.seer
+                  ? "one crewmate checks one player each night"
+                  : "no investigative role — vanilla Among Us"}
+              </span>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings.seer}
+              onClick={() => set({ seer: !settings.seer })}
+              className={`${s.toggle} ${settings.seer ? s.toggleOn : ""}`}
+            >
+              <span className={s.toggleKnob} />
+            </button>
+          </div>
 
           <div className={s.setting}>
             <span className={s.settingLabel}>

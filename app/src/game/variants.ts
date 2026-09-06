@@ -24,6 +24,15 @@ export type Settings = {
   impostors: number;
   /** Tasks dealt to each player. */
   tasksPerPlayer: number;
+  /**
+   * Give one crewmate the seer's night check.
+   *
+   * The RFP names night actions as "impostor kills, seer checks", so this is
+   * the RFP's role rather than base Among Us's — the closest thing the real
+   * game has is the Sheriff from The Other Roles mod. Off by default, because
+   * vanilla Among Us has no investigative role.
+   */
+  seer: boolean;
   /** Seconds of free roam before a meeting can be forced. */
   nightSecs: number;
   /** Seconds the ballot stays open. */
@@ -40,6 +49,8 @@ export const IMPOSTOR_NAME = "Impostor";
 export const IMPOSTOR_PLURAL = "Impostors";
 export const CREW_NAME = "Crew";
 
+export const SEER_NAME = "Seer";
+
 export const MIN_IMPOSTORS = 1;
 export const MAX_IMPOSTORS = 3;
 export const MIN_TASKS = 1;
@@ -51,6 +62,7 @@ export const DEFAULT_SETTINGS: Settings = {
   maxPlayers: 10,
   impostors: 1,
   tasksPerPlayer: 3,
+  seer: false,
   nightSecs: 90,
   voteSecs: 120,
   confirmEjects: true,
@@ -81,6 +93,10 @@ export function normalise(s: Settings): Settings {
     impostors,
     maxPlayers: clamp(s.maxPlayers, floor, PLAYER_CEILING),
     tasksPerPlayer: clamp(s.tasksPerPlayer, MIN_TASKS, MAX_TASKS),
+    // `hidden_count + seer_count < min_players` in the constructor. With the
+    // floor at 5 and at most 3 impostors this never binds, but the engine
+    // asserts it too, so keep the clamp honest rather than assuming.
+    seer: s.seer && impostors + 1 < floor,
     nightSecs: clamp(s.nightSecs, 10, 1200),
     voteSecs: clamp(s.voteSecs, 10, 1200),
     confirmEjects: s.confirmEjects,

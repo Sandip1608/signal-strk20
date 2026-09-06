@@ -74,6 +74,8 @@ export function ShipMap({
   onCompleteTask,
   onKill,
   canKill,
+  onInvestigate,
+  canCheck,
   onVent,
   onSabotage,
   onFixLights,
@@ -90,6 +92,10 @@ export function ShipMap({
   onCompleteTask: (taskId: string) => void;
   onKill: (victim: number) => void;
   canKill: boolean;
+  /** The seer's night check. Co-located, so it costs them a walk. */
+  onInvestigate: (target: number) => void;
+  /** Seer, alive, and has not spent tonight's check. */
+  canCheck: boolean;
   onVent: () => void;
   onSabotage: () => void;
   onFixLights: () => void;
@@ -120,6 +126,9 @@ export function ShipMap({
   const here = ship.positions[me.seat];
   const canGo = neighbours(here);
   const roomMates = occupants(ship, here, livingSeats).filter((x) => x !== me.seat);
+  // What this seat already knows. Empty for everyone but the seer — the relay
+  // redacts it, so a crewmate's copy is always `{}`.
+  const known = me.checks ?? {};
   const task = taskHere(ship, me.seat);
   const myTasks = ship.tasks[me.seat] ?? [];
   // One shared number, computed where every role is known. Working it out
@@ -249,6 +258,20 @@ export function ShipMap({
             </button>
           ))}
 
+        {canCheck &&
+          roomMates
+            .filter((x) => !(x in known))
+            .map((target) => (
+              <button
+                key={`check-${target}`}
+                type="button"
+                className={s.check}
+                onClick={() => onInvestigate(target)}
+              >
+                Check {living.find((x) => x.seat === target)?.name}
+              </button>
+            ))}
+
         {ventTo && (
           <button type="button" className={s.vent} onClick={onVent}>
             Vent to {ROOM_BY_ID[ventTo].name}
@@ -279,6 +302,18 @@ export function ShipMap({
           </button>
         )}
       </div>
+
+      {Object.keys(known).length > 0 && (
+        <ul className={s.checkList}>
+          {Object.entries(known).map(([seat, guilty]) => (
+            <li key={seat} className={guilty ? s.checkGuilty : s.checkClear}>
+              <span className={s.taskTick}>{guilty ? "!" : "✓"}</span>
+              {living.find((x) => x.seat === Number(seat))?.name ?? `Seat ${seat}`} —{" "}
+              {guilty ? "an impostor" : "not an impostor"}
+            </li>
+          ))}
+        </ul>
+      )}
 
       {/* ── task list ────────────────────────────────────────────────── */}
       <ul className={s.taskList}>
