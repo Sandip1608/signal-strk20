@@ -102,6 +102,14 @@ pub mod phases {
 /// Sentinel meaning "no seat" in fields that store `seat + 1`.
 pub const NO_SEAT: u32 = 0;
 
+/// Candidate value meaning "skip" — an abstention rather than an accusation.
+///
+/// Among Us lets a table decline to eject anyone, and without it every round
+/// forces an accusation even when nobody has evidence. Encoded as a sentinel
+/// candidate so the escrow's anonymous vote leg needs no second entrypoint:
+/// a skip is an ordinary vote that happens to name nobody.
+pub const SKIP_VOTE: u32 = 0xffffffff;
+
 #[starknet::contract]
 pub mod SignalRound {
     use core::num::traits::Zero;
@@ -155,7 +163,10 @@ pub mod SignalRound {
         vote_duration: u64,
         vote_deadline: u64,
         tallies: Map<u32, u256>,
+        skip_tally: u256,
         total_votes: u256,
+        // -- emergency meetings --
+        called_meeting: Map<u32, bool>, // seat -> has already called one
         // -- resolution --
         ejected: u32, // seat + 1, 0 = tie / nobody ejected
         impostor: u32, // first hidden seat + 1, revealed at resolve
@@ -171,6 +182,7 @@ pub mod SignalRound {
         NightStarted: NightStarted,
         BodyReported: BodyReported,
         NightSkipped: NightSkipped,
+        MeetingCalled: MeetingCalled,
         VoteRecorded: VoteRecorded,
         RoundResolved: RoundResolved,
     }
@@ -201,6 +213,12 @@ pub mod SignalRound {
 
     #[derive(Drop, starknet::Event)]
     struct NightSkipped {
+        vote_deadline: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct MeetingCalled {
+        caller_seat: u32,
         vote_deadline: u64,
     }
 
@@ -262,9 +280,20 @@ pub mod SignalRound {
             assert(get_caller_address() == self.escrow.read(), 'only escrow');
             assert(self.phase.read() == phases::VOTE, 'not in vote phase');
             assert(get_block_timestamp() <= self.vote_deadline.read(), 'vote closed');
+            assert(amount > 0, 'zero vote');
+
+            // A skip is an ordinary anonymous leg that names nobody, so the
+            // escrow path is identical and the tally stays publicly computable.
+            if candidate_seat == super::SKIP_VOTE {
+                let new_tally = self.skip_tally.read() + amount;
+                self.skip_tally.write(new_tally);
+                self.total_votes.write(self.total_votes.read() + amount);
+                self.emit(VoteRecorded { candidate_seat, amount, new_tally });
+                return;
+            }
+
             assert(candidate_seat < self.player_count.read(), 'bad candidate');
             assert(!self.dead.read(candidate_seat), 'candidate dead');
-            assert(amount > 0, 'zero vote');
             let new_tally = self.tallies.read(candidate_seat) + amount;
             self.tallies.write(candidate_seat, new_tally);
             self.total_votes.write(self.total_votes.read() + amount);
@@ -397,6 +426,28 @@ pub mod SignalRound {
             self.emit(BodyReported { victim_seat: seat, vote_deadline: self.vote_deadline.read() });
         }
 
+        /// Any living player may call one emergency meeting per round, signed
+        /// by their SESSION KEY.
+        ///
+        /// Without this the only way to a vote is a body being reported or the
+        /// host skipping after the deadline, so a crew member who is certain of
+        /// something has no way to act on it. One per seat, so it cannot be
+        /// used to stall the round indefinitely.
+        fn call_meeting(ref self: ContractState) {
+            assert(self.phase.read() == phases::NIGHT, 'not night');
+            let seat = self.seat_of_session_key(get_caller_address());
+            assert(!self.dead.read(seat), 'dead cannot call');
+            assert(!self.called_meeting.read(seat), 'meeting already used');
+            self.called_meeting.write(seat, true);
+            self.open_vote();
+            self
+                .emit(
+                    MeetingCalled {
+                        caller_seat: seat, vote_deadline: self.vote_deadline.read(),
+                    },
+                );
+        }
+
         /// Fallback if no body is reported by the night deadline (impostor
         /// idled, or victim refuses to report): host advances to the vote.
         fn skip_night(ref self: ContractState) {
@@ -526,6 +577,14 @@ pub mod SignalRound {
             self.total_votes.read()
         }
 
+        fn skip_tally(self: @ContractState) -> u256 {
+            self.skip_tally.read()
+        }
+
+        fn has_called_meeting(self: @ContractState, seat: u32) -> bool {
+            self.called_meeting.read(seat)
+        }
+
         fn deadlines(self: @ContractState) -> (u64, u64) {
             (self.night_deadline.read(), self.vote_deadline.read())
         }
@@ -610,7 +669,10 @@ pub mod SignalRound {
                 }
                 seat += 1;
             }
-            if tied || best == 0 {
+            // A skip that matches or beats the leading accusation ejects
+            // nobody - the table declined. Ties between players eject nobody
+            // either.
+            if tied || best == 0 || self.skip_tally.read() >= best {
                 0
             } else {
                 best_seat_plus_one
@@ -634,6 +696,7 @@ pub trait ISignalRoundGame<T> {
     fn start_night(ref self: T);
     fn report_night_kill(ref self: T);
     fn skip_night(ref self: T);
+    fn call_meeting(ref self: T);
     fn resolve_round(ref self: T, host_seed: felt252, salt: felt252);
     fn host(self: @T) -> starknet::ContractAddress;
     fn escrow(self: @T) -> starknet::ContractAddress;
@@ -643,6 +706,8 @@ pub trait ISignalRoundGame<T> {
     fn night_victim(self: @T) -> u32;
     fn role_commitment(self: @T) -> felt252;
     fn total_votes(self: @T) -> u256;
+    fn skip_tally(self: @T) -> u256;
+    fn has_called_meeting(self: @T, seat: u32) -> bool;
     fn deadlines(self: @T) -> (u64, u64);
     fn crew_won(self: @T) -> bool;
     fn winner_count(self: @T) -> u32;

@@ -56,6 +56,27 @@ export function neighbours(id: RoomId): RoomId[] {
 }
 
 /**
+ * Vent network — impostor-only travel between rooms that are *not* adjacent.
+ *
+ * This is what makes an alibi hard to trust: without it, "I saw them in
+ * Electrical ten seconds ago" rules them out of Weapons, and the deduction
+ * collapses into simple bookkeeping.
+ */
+export const VENTS: [RoomId, RoomId][] = [
+  ["electrical", "weapons"],
+  ["upper-engine", "reactor"],
+  ["medbay", "cafeteria"],
+];
+
+export function ventFrom(room: RoomId): RoomId | null {
+  for (const [a, b] of VENTS) {
+    if (a === room) return b;
+    if (b === room) return a;
+  }
+  return null;
+}
+
+/**
  * Where the round opens.
  *
  * Players are spread across the deck rather than all starting in one room.
@@ -196,6 +217,14 @@ export type ShipState = {
   /** seat -> that player's task list. */
   tasks: Record<number, TaskInstance[]>;
   sightings: Sighting[];
+  /**
+   * Unix ms before which no kill is allowed. Set when the night opens and
+   * again after each kill — without it an impostor kills the instant they
+   * share a room, and the night is over before anyone has walked anywhere.
+   */
+  killReadyAt: number;
+  /** Unix ms the lights come back on. 0 = lights are up. */
+  lightsOutUntil: number;
 };
 
 const DEFAULT_TASKS_PER_PLAYER = 3;
@@ -219,6 +248,12 @@ function rollMagnitude(kind: TaskKind): number {
 
 /** How many extra log entries finishing your whole list is worth. */
 const SECURITY_LOG_ENTRIES = 2;
+
+/** Seconds an impostor must wait before the first (and each next) kill. */
+export const KILL_COOLDOWN_SECS = 20;
+
+/** Seconds the lights stay out once sabotaged. */
+export const LIGHTS_OUT_SECS = 25;
 
 function shuffled<T>(xs: T[]): T[] {
   const a = [...xs];
@@ -284,7 +319,58 @@ export function initShip(
     }
   }
 
-  return { positions, tasks, sightings };
+  return {
+    positions,
+    tasks,
+    sightings,
+    killReadyAt: now + KILL_COOLDOWN_SECS * 1000,
+    lightsOutUntil: 0,
+  };
+}
+
+/** Whether the impostor may kill right now. */
+export function killReady(ship: ShipState, now = Date.now()): boolean {
+  return now >= ship.killReadyAt;
+}
+
+export function killCooldownLeft(ship: ShipState, now = Date.now()): number {
+  return Math.max(0, Math.ceil((ship.killReadyAt - now) / 1000));
+}
+
+/** Start the cooldown again after a kill. */
+export function armKillCooldown(ship: ShipState, now = Date.now()): ShipState {
+  return { ...ship, killReadyAt: now + KILL_COOLDOWN_SECS * 1000 };
+}
+
+export function lightsOut(ship: ShipState, now = Date.now()): boolean {
+  return now < ship.lightsOutUntil;
+}
+
+export function lightsOutLeft(ship: ShipState, now = Date.now()): number {
+  return Math.max(0, Math.ceil((ship.lightsOutUntil - now) / 1000));
+}
+
+/**
+ * Impostor sabotage: cut the lights.
+ *
+ * While they are out nobody can see who else is in their room, so sightings
+ * stop accruing and the crew lose the evidence trail. Any player standing in
+ * Electrical can restore them.
+ */
+export function sabotageLights(ship: ShipState, now = Date.now()): ShipState {
+  return { ...ship, lightsOutUntil: now + LIGHTS_OUT_SECS * 1000 };
+}
+
+export function fixLights(ship: ShipState): ShipState {
+  return { ...ship, lightsOutUntil: 0 };
+}
+
+/** Travel through a vent. Impostor-only; enforced by the caller. */
+export function vent(ship: ShipState, seat: number, now = Date.now()): ShipState {
+  const to = ventFrom(ship.positions[seat]);
+  if (!to) return ship;
+  // Deliberately records no sighting: moving unseen is the entire point.
+  return { ...ship, positions: { ...ship.positions, [seat]: to } };
 }
 
 /** Everyone (living) currently standing in `room`. */
@@ -312,7 +398,14 @@ export function move(
   const alreadyThere = occupants(ship, to, living).filter((s) => s !== seat);
 
   const sightings: Sighting[] = [...ship.sightings];
-  for (const other of alreadyThere) {
+  // Two reasons a move records nothing:
+  //  - the lights are out, so nobody can tell who is beside them (that is what
+  //    makes the sabotage worth doing);
+  //  - the mover is dead. Ghosts keep doing tasks but are invisible, so they
+  //    must not manufacture alibis for themselves or anyone else.
+  const dark = lightsOut(ship, now);
+  const ghost = !living.includes(seat);
+  for (const other of dark || ghost ? [] : alreadyThere) {
     sightings.push({ at: now, observer: seat, who: other, room: to });
     sightings.push({ at: now, observer: other, who: seat, room: to });
   }

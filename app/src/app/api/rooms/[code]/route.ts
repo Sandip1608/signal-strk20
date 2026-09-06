@@ -50,7 +50,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
   // Seat-bound actions are taken from the server's claim table, never from the
   // client — otherwise anyone could post a vote as somebody else's seat.
   const claimed = seatOfPlayer(room, action.playerId ?? null);
-  const seatBound = ["seeRole", "move", "task", "kill", "report", "vote"];
+  const seatBound = ["seeRole", "move", "task", "kill", "report", "vote", "callMeeting", "vent"];
   if (seatBound.includes(action.type)) {
     if (claimed === null) {
       return NextResponse.json({ error: "not seated in this room" }, { status: 403 });

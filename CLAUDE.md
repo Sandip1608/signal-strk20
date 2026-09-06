@@ -261,6 +261,28 @@ task list, and three hand-rolled minigames — wire matching, a keypad, and
 a timing gauge. No canvas, no game library; the only per-frame animation is
 the gauge needle inside its own modal.
 
+**Among Us rules now implemented.** Skip vote (`SKIP_VOTE` sentinel — an
+abstention is an ordinary anonymous leg naming nobody, so the escrow needs no
+second entrypoint; a skip that *matches or beats* the top accusation ejects
+nobody, as in the real game). Emergency meetings (`call_meeting`, one per seat,
+signed by the session key). Kill cooldown. Vents (impostor-only travel between
+non-adjacent rooms, recording **no** sighting — that is the point). Lights
+sabotage (no sightings accrue in the dark; fixable from Electrical). Ghosts
+(dead players keep doing tasks, move unseen, cannot vote or kill).
+
+**Deliberately still not built**, and each for a reason, not for lack of time:
+- *Multi-round.* The phase machine resolves after one vote. Looping multiplies
+  state-machine edges and demo time; it is a documented scope cut.
+- *Crew-win-by-tasks.* Tasks are off-chain, so the contract cannot verify them.
+  A second win condition would put the UI and the contract into disagreement.
+- *Persistent bodies.* A corpse anyone can find would replace the private note
+  only the victim can decrypt — which is the mechanic the RFP is actually
+  about. Self-reporting is the privacy story, not a shortcut.
+
+**Every bigint on `GameState` must be added to `jsonSafe`.** Adding
+`skipTally` without it made `JSON.stringify` throw and every relay route 500 —
+it does not degrade gracefully. Same for `reviveBigints` on the client.
+
 **The five-variant picker was removed; it is Among Us with host settings.**
 Measured, only three of the five were mechanically distinct — One Night
 Werewolf, Secret Hitler and Avalon were byte-identical configurations (5-10

@@ -100,6 +100,7 @@ function reviveBigints(view: RoomView): RoomView {
       ...view.game,
       tallies,
       totalVotes: BigInt((view.game.totalVotes as unknown as string) ?? 0),
+      skipTally: BigInt((view.game.skipTally as unknown as string) ?? 0),
     },
   };
 }

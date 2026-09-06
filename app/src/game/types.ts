@@ -75,6 +75,8 @@ export type Seat = {
   roleSeen: boolean;
   /** Whether this seat's anonymous vote leg has been submitted. */
   hasVoted: boolean;
+  /** One emergency meeting per player per round. */
+  calledMeeting: boolean;
 };
 
 export type GameState = {
@@ -133,6 +135,8 @@ export type GameState = {
 
   /** seat -> accumulated vote weight. Public by design (RFP wants a computable tally). */
   tallies: Record<number, bigint>;
+  /** Votes to eject nobody. */
+  skipTally: bigint;
   totalVotes: bigint;
 
   /** `seat + 1`; 0 = tie / nobody ejected. */
@@ -153,6 +157,13 @@ export type LogEntry = {
   /** Actions that are private in the real system are marked so the UI can say so. */
   private?: boolean;
 };
+
+/**
+ * `round.cairo::SKIP_VOTE`. A vote that names nobody — the table declining to
+ * eject. Kept identical to the Cairo sentinel so a skip is an ordinary
+ * anonymous leg rather than a second entrypoint.
+ */
+export const SKIP_VOTE = 0xffffffff;
 
 /** The buy-in / vote weight unit. One seat, one vote of equal weight in v1. */
 export const VOTE_WEIGHT = 1n;

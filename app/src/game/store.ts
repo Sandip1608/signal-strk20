@@ -67,6 +67,10 @@ type Store = {
   kill: (victimSeat: number) => void;
   report: (seat: number) => void;
   skipNight: () => void;
+  callMeeting: (seat: number) => void;
+  useVent: (seat: number) => void;
+  sabotageLights: () => void;
+  fixLights: () => void;
   vote: (voterSeat: number, candidateSeat: number) => void;
   /** Apply one bot action. Deliberately leaves viewer/reveal state alone. */
   botAct: (action: BotAction) => void;
@@ -227,6 +231,8 @@ export const useGame = create<Store>((set, get) => ({
     }
     set((st) => {
       if (!st.ship || !st.game) return {};
+      // `living` gates who can be *seen*, not who may move - a ghost still
+      // walks the deck to finish its tasks.
       const living = st.game.seats.filter((x) => !x.dead).map((x) => x.seat);
       return { ship: ship.move(st.ship, seat, to, living) };
     });
@@ -246,6 +252,7 @@ export const useGame = create<Store>((set, get) => ({
       return;
     }
     apply(set, (g) => engine.privateKill(g, victimSeat));
+    set((st) => (st.ship ? { ship: ship.armKillCooldown(st.ship) } : {}));
   },
 
   report: (seat) => {
@@ -265,6 +272,38 @@ export const useGame = create<Store>((set, get) => ({
       return;
     }
     apply(set, (g) => engine.skipNight(g));
+  },
+
+  callMeeting: (seat) => {
+    if (get().mode === "online") {
+      void get().send({ type: "callMeeting" });
+      return;
+    }
+    apply(set, (g) => engine.callMeeting(g, seat));
+  },
+
+  useVent: (seat) => {
+    if (get().mode === "online") {
+      void get().send({ type: "vent" });
+      return;
+    }
+    set((st) => (st.ship ? { ship: ship.vent(st.ship, seat) } : {}));
+  },
+
+  sabotageLights: () => {
+    if (get().mode === "online") {
+      void get().send({ type: "sabotageLights" });
+      return;
+    }
+    set((st) => (st.ship ? { ship: ship.sabotageLights(st.ship) } : {}));
+  },
+
+  fixLights: () => {
+    if (get().mode === "online") {
+      void get().send({ type: "fixLights" });
+      return;
+    }
+    set((st) => (st.ship ? { ship: ship.fixLights(st.ship) } : {}));
   },
 
   vote: (voterSeat, candidateSeat) => {

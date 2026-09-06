@@ -15,6 +15,7 @@ import {
   CEIL_PLAYERS,
   FLOOR_PLAYERS,
   NO_SEAT,
+  SKIP_VOTE,
   Phase,
   VOTE_WEIGHT,
   type GameState,
@@ -85,6 +86,7 @@ export function createGame(opts: {
     nightVictim: NO_SEAT,
     pendingVictim: NO_SEAT,
     tallies: {},
+    skipTally: 0n,
     totalVotes: 0n,
     ejected: NO_SEAT,
     impostorRevealed: NO_SEAT,
@@ -142,6 +144,7 @@ export function join(
     dead: false,
     roleSeen: false,
     hasVoted: false,
+    calledMeeting: false,
   };
 
   return log(
@@ -260,6 +263,25 @@ export function reportNightKill(
   );
 }
 
+/**
+ * `call_meeting()` — any living player, once per round, signed by their
+ * session key. Opens the vote without waiting for a body.
+ */
+export function callMeeting(state: GameState, seat: number, now = Date.now()): GameState {
+  require_(state.phase === Phase.NIGHT, "not night");
+  const caller = seatOf(state, seat);
+  require_(!caller.dead, "dead cannot call");
+  require_(!caller.calledMeeting, "meeting already used");
+
+  const seats = state.seats.map((s) =>
+    s.seat === seat ? { ...s, calledMeeting: true } : s,
+  );
+  return log(openVote({ ...state, seats, pendingVictim: NO_SEAT }, now), {
+    call: "call_meeting",
+    text: `${caller.name} called an emergency meeting, signed by burner ${short(caller.sessionKey)}.`,
+  });
+}
+
 /** `skip_night()` — host-only fallback once the night deadline has passed. */
 export function skipNight(state: GameState, now = Date.now()): GameState {
   require_(state.phase === Phase.NIGHT, "not night");
@@ -292,8 +314,11 @@ export function handleVote(
 ): GameState {
   require_(state.phase === Phase.VOTE, "not in vote phase");
   require_(now <= state.voteDeadline, "vote closed");
-  require_(p.candidateSeat >= 0 && p.candidateSeat < state.seats.length, "bad candidate");
-  require_(!seatOf(state, p.candidateSeat).dead, "candidate dead");
+  const skipping = p.candidateSeat === SKIP_VOTE;
+  if (!skipping) {
+    require_(p.candidateSeat >= 0 && p.candidateSeat < state.seats.length, "bad candidate");
+    require_(!seatOf(state, p.candidateSeat).dead, "candidate dead");
+  }
 
   const voter = seatOf(state, p.voterSeat);
   require_(!voter.dead, "dead cannot vote");
@@ -303,18 +328,23 @@ export function handleVote(
   require_(amount > 0n, "zero vote");
 
   const tallies = { ...state.tallies };
-  tallies[p.candidateSeat] = (tallies[p.candidateSeat] ?? 0n) + amount;
+  let skipTally = state.skipTally;
+  if (skipping) skipTally += amount;
+  else tallies[p.candidateSeat] = (tallies[p.candidateSeat] ?? 0n) + amount;
 
   return log(
     {
       ...state,
       tallies,
+      skipTally,
       totalVotes: state.totalVotes + amount,
       seats: state.seats.map((s) => (s.seat === p.voterSeat ? { ...s, hasVoted: true } : s)),
     },
     {
       call: "privacy_invoke → handle_vote",
-      text: `An anonymous vote leg landed on seat ${p.candidateSeat}. Tally now ${tallies[p.candidateSeat]}. Voter stays inside the pool.`,
+      text: skipping
+        ? `An anonymous vote leg declined to accuse anyone. Skips now ${skipTally}. Voter stays inside the pool.`
+        : `An anonymous vote leg landed on seat ${p.candidateSeat}. Tally now ${tallies[p.candidateSeat]}. Voter stays inside the pool.`,
       private: true,
     },
   );
@@ -342,7 +372,8 @@ export function computeEjected(state: GameState): number {
     }
   }
 
-  return tied || best === 0n ? 0 : bestSeatPlusOne;
+  // A skip that matches or beats the leading accusation ejects nobody.
+  return tied || best === 0n || state.skipTally >= best ? 0 : bestSeatPlusOne;
 }
 
 /**

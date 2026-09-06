@@ -16,7 +16,7 @@ import { Ejection } from "./ship/Ejection";
 import { useGame } from "@/game/store";
 import { ROOM_BY_ID, sightingsFor, tasksComplete } from "@/game/ship";
 import { livingSeats, short } from "@/game/engine";
-import { type GameState, type Seat } from "@/game/types";
+import { SKIP_VOTE, type GameState, type Seat } from "@/game/types";
 import { CREW_NAME, IMPOSTOR_NAME, impostorLabel } from "@/game/variants";
 
 // ── Lobby ──────────────────────────────────────────────────────────────────
@@ -217,8 +217,10 @@ export function RolePanel({ game }: { game: GameState }) {
 // ── Night ──────────────────────────────────────────────────────────────────
 
 export function NightPanel({ game }: { game: GameState }) {
-  const { viewerSeat, revealed, setViewer, reveal, cover, kill, report, skipNight, ship, moveTo, completeTask, mode } =
-    useGame();
+  const {
+    viewerSeat, revealed, setViewer, reveal, cover, kill, report, skipNight,
+    ship, moveTo, completeTask, mode, callMeeting, useVent, sabotageLights, fixLights,
+  } = useGame();
   const online = mode === "online";
   const nightOver = useDeadline(game.nightDeadline);
 
@@ -290,9 +292,11 @@ export function NightPanel({ game }: { game: GameState }) {
       <div className={s.panel}>
           <h2 className={s.panelTitle}>{isImpostor ? "The deck — find someone alone" : "The deck"}</h2>
         <p className={s.panelHint}>
-          {isImpostor
-            ? "Walk the deck. You can only kill someone standing in the same room as you — and the note moves privately inside the pool, so no transaction names you or your target."
-            : "Walk the deck and finish your tasks. Note who you see and where — that is all the crew will have to argue from at the meeting."}
+          {viewer.dead
+            ? "You are a ghost. You can still finish your tasks, but nobody can see you and you cannot vote."
+            : isImpostor
+              ? "Walk the deck. You can only kill someone standing in the same room as you — and the note moves privately inside the pool, so no transaction names you or your target."
+              : "Walk the deck and finish your tasks. Note who you see and where — that is all the crew will have to argue from at the meeting."}
         </p>
 
         {ship ? (
@@ -300,13 +304,18 @@ export function NightPanel({ game }: { game: GameState }) {
             ship={ship}
             me={viewer}
             living={livingSeats(game)}
-            canKill={isImpostor}
+            canKill={isImpostor && !viewer.dead}
             onMove={(to) => moveTo(viewer.seat, to)}
             onCompleteTask={(taskId) => completeTask(viewer.seat, taskId)}
             onKill={(victim) => {
               kill(victim);
               cover();
             }}
+            onVent={() => useVent(viewer.seat)}
+            onSabotage={sabotageLights}
+            onFixLights={fixLights}
+            onCallMeeting={() => callMeeting(viewer.seat)}
+            canCallMeeting={!viewer.calledMeeting && !viewer.dead}
           />
         ) : (
           <p className={s.panelHint}>The deck is not ready.</p>
@@ -340,8 +349,8 @@ export function NightPanel({ game }: { game: GameState }) {
             name={x.name}
             dead={x.dead}
             onClick={() => setViewer(x.seat)}
-            disabled={x.dead || x.isBot}
-            tag={x.dead ? "dead" : x.isBot ? "on its own" : "tap when holding"}
+            disabled={x.isBot}
+            tag={x.dead ? "ghost — tasks only" : x.isBot ? "on its own" : "tap when holding"}
           />
         ))}
       </div>
@@ -416,6 +425,22 @@ export function VotePanel({ game }: { game: GameState }) {
               />
             ))}
         </div>
+
+        {/* Abstaining is a real Among Us move: without it every round forces
+            an accusation even when nobody has evidence. It is an ordinary
+            anonymous leg that names the SKIP_VOTE sentinel. */}
+        <div className={s.btnRow}>
+          <button
+            type="button"
+            className={`${s.btn} ${s.btnGhost}`}
+            onClick={() => vote(viewer.seat, SKIP_VOTE)}
+          >
+            Skip — eject nobody
+          </button>
+          <span className={s.tagline}>
+            If skips match or beat the top accusation, nobody goes out the airlock.
+          </span>
+        </div>
         <div className={s.btnRow}>
           <button type="button" className={`${s.btn} ${s.btnGhost}`} onClick={cover}>
             Cancel
@@ -463,6 +488,9 @@ export function VotePanel({ game }: { game: GameState }) {
           Live tally
         </h3>
         <Tally game={game} />
+        <p className={s.tagline} style={{ display: "block", marginTop: 6 }}>
+          Skip: {String(game.skipTally)} — nobody is ejected unless one player beats this.
+        </p>
       </div>
 
       <div className={s.btnRow}>

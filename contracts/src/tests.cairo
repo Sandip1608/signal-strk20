@@ -98,6 +98,49 @@ mod tests {
         derive_hidden(seed(1), 3, 4);
     }
 
+    // ── skip votes ────────────────────────────────────────────────────────
+
+    /// The sentinel must sit outside any real seat index, or a skip would be
+    /// indistinguishable from an accusation against a high seat number.
+    #[test]
+    fn skip_sentinel_is_not_a_seat() {
+        assert(signal::round::SKIP_VOTE > 15, 'skip collides with a seat');
+        assert(signal::round::SKIP_VOTE != signal::round::NO_SEAT, 'skip collides with NO_SEAT');
+    }
+
+    /// Ejection is a strict max that must also beat the skip pile. These
+    /// mirror `compute_ejected`'s arithmetic, which is the rule most likely to
+    /// be got subtly wrong.
+    fn ejects(best: u256, tied: bool, skip: u256) -> bool {
+        !(tied || best == 0 || skip >= best)
+    }
+
+    #[test]
+    fn skip_beating_the_leader_ejects_nobody() {
+        assert(!ejects(2, false, 3), 'skip should win');
+    }
+
+    #[test]
+    fn skip_tying_the_leader_ejects_nobody() {
+        // Among Us declines to eject on a tie with skip.
+        assert(!ejects(3, false, 3), 'tie with skip should hold');
+    }
+
+    #[test]
+    fn leader_above_the_skip_pile_is_ejected() {
+        assert(ejects(4, false, 3), 'leader should be ejected');
+    }
+
+    #[test]
+    fn a_tie_between_players_ejects_nobody() {
+        assert(!ejects(3, true, 0), 'player tie should hold');
+    }
+
+    #[test]
+    fn all_zero_tallies_eject_nobody() {
+        assert(!ejects(0, false, 0), 'no votes should eject nobody');
+    }
+
     // ── cross-language parity ─────────────────────────────────────────────
 
     /// These exact seat lists were produced by the TypeScript mirror in

@@ -379,3 +379,30 @@
   .deck { grid-template-rows: repeat(2, minmax(84px, 1fr)); }
   .room { min-height: 84px; }
 }
+
+/* ── impostor + meeting actions ─────────────────────────────────────── */
+
+.vent,
+.sabotage,
+.meeting {
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 10px;
+  border: none;
+  font: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: filter 0.15s, transform 0.08s;
+}
+.vent:hover, .sabotage:hover, .meeting:hover { filter: brightness(1.1); }
+.vent:active, .sabotage:active, .meeting:active { transform: scale(0.985); }
+
+/* Moving unseen - purple, matching the "never public" marker in the log. */
+.vent { background: #b78bff; color: #1c1030; }
+/* Cutting the lights. */
+.sabotage { background: #2a2c42; color: #e8e9f3; border: 1px solid #4a4d70; }
+/* Calling everyone in. */
+.meeting { background: #f5c451; color: #2a2410; }
+
+.kill:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.4); }

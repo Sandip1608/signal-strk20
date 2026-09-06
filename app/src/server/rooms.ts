@@ -136,6 +136,10 @@ export type Action =
   | { type: "kill"; seat: number; victim: number }
   | { type: "report"; seat: number }
   | { type: "skipNight" }
+  | { type: "callMeeting"; seat: number }
+  | { type: "vent"; seat: number }
+  | { type: "sabotageLights" }
+  | { type: "fixLights" }
   | { type: "vote"; seat: number; candidate: number }
   | { type: "resolve" }
   | { type: "payout" };
@@ -223,6 +227,23 @@ export function applyAction(room: Room, action: Action): void {
 
     case "kill":
       room.game = engine.privateKill(g0, action.victim);
+      if (room.ship) room.ship = ship.armKillCooldown(room.ship);
+      break;
+
+    case "callMeeting":
+      room.game = engine.callMeeting(g0, action.seat);
+      break;
+
+    case "vent":
+      if (room.ship) room.ship = ship.vent(room.ship, action.seat);
+      break;
+
+    case "sabotageLights":
+      if (room.ship) room.ship = ship.sabotageLights(room.ship);
+      break;
+
+    case "fixLights":
+      if (room.ship) room.ship = ship.fixLights(room.ship);
       break;
 
     case "report":
@@ -351,6 +372,8 @@ export function viewFor(room: Room, seat: number | null): ViewerState {
       if (n === seat || (myRoom !== null && v === myRoom)) positions[n] = v;
     }
     shipView = {
+      killReadyAt: room.ship.killReadyAt,
+      lightsOutUntil: room.ship.lightsOutUntil,
       positions,
       // Task lists are sent in full, deliberately. They carry no role
       // information — the impostor gets a list too — and the shared crew
@@ -396,6 +419,9 @@ export function jsonSafe(view: ViewerState) {
     game: {
       ...view.game,
       totalVotes: view.game.totalVotes.toString(),
+      // Every bigint on GameState must be listed here. Missing one does not
+      // degrade gracefully - JSON.stringify throws and the whole route 500s.
+      skipTally: view.game.skipTally.toString(),
       tallies: Object.fromEntries(
         Object.entries(view.game.tallies).map(([seat, n]) => [seat, n.toString()]),
       ),

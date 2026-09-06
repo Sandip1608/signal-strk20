@@ -14,16 +14,21 @@
  * information and there would be nothing left to deduce at the meeting.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import s from "./ship.module.css";
 import { Minigame } from "./Minigames";
 import {
   ROOMS,
   ROOM_BY_ID,
+  killCooldownLeft,
+  killReady,
+  lightsOut,
+  lightsOutLeft,
   neighbours,
   occupants,
   taskHere,
   taskProgress,
+  ventFrom,
   type RoomId,
   type ShipState,
 } from "@/game/ship";
@@ -68,6 +73,11 @@ export function ShipMap({
   onCompleteTask,
   onKill,
   canKill,
+  onVent,
+  onSabotage,
+  onFixLights,
+  onCallMeeting,
+  canCallMeeting,
 }: {
   ship: ShipState;
   me: Seat;
@@ -76,8 +86,24 @@ export function ShipMap({
   onCompleteTask: (taskId: string) => void;
   onKill: (victim: number) => void;
   canKill: boolean;
+  onVent: () => void;
+  onSabotage: () => void;
+  onFixLights: () => void;
+  onCallMeeting: () => void;
+  canCallMeeting: boolean;
 }) {
   const [openTask, setOpenTask] = useState<string | null>(null);
+  // Re-render once a second so the cooldown and lights timers tick.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 500);
+    return () => clearInterval(id);
+  }, []);
+
+  const dark = lightsOut(ship);
+  const canKillNow = canKill && killReady(ship);
+  const cooldown = killCooldownLeft(ship);
+  const ventTo = canKill ? ventFrom(ship.positions[me.seat]) : null;
 
   const livingSeats = living.map((x) => x.seat);
   const here = ship.positions[me.seat];
@@ -98,8 +124,9 @@ export function ShipMap({
           const isHere = room.id === here;
           const reachable = canGo.includes(room.id);
           const mine = myTasks.find((t) => t.room === room.id && !t.done);
-          // Fog of war: crewmates render only in the room you are standing in.
-          const dots = isHere ? [me.seat, ...roomMates] : [];
+          // Fog of war: crewmates render only in the room you are standing in —
+          // and in the dark, not even them.
+          const dots = isHere ? (dark ? [me.seat] : [me.seat, ...roomMates]) : [];
 
           return (
             <button
@@ -143,9 +170,11 @@ export function ShipMap({
       <div className={s.status}>
         <span className={s.statusRoom}>{ROOM_BY_ID[here].name}</span>
         <span className={s.statusWho}>
-          {roomMates.length === 0
-            ? "You are alone here."
-            : `With you: ${roomMates.map((x) => living.find((l) => l.seat === x)?.name).join(", ")}`}
+          {dark
+            ? `Lights out — you cannot see who is here (${lightsOutLeft(ship)}s)`
+            : roomMates.length === 0
+              ? "You are alone here."
+              : `With you: ${roomMates.map((x) => living.find((l) => l.seat === x)?.name).join(", ")}`}
         </span>
         <span className={s.progressWrap} title="Crew tasks completed">
           <span
@@ -178,11 +207,38 @@ export function ShipMap({
               key={victim}
               type="button"
               className={s.kill}
+              disabled={!canKillNow}
               onClick={() => onKill(victim)}
             >
-              Kill {living.find((x) => x.seat === victim)?.name}
+              {canKillNow
+                ? `Kill ${living.find((x) => x.seat === victim)?.name}`
+                : `Kill in ${cooldown}s`}
             </button>
           ))}
+
+        {ventTo && (
+          <button type="button" className={s.vent} onClick={onVent}>
+            Vent to {ROOM_BY_ID[ventTo].name}
+          </button>
+        )}
+
+        {canKill && !dark && (
+          <button type="button" className={s.sabotage} onClick={onSabotage}>
+            Sabotage lights
+          </button>
+        )}
+
+        {dark && ship.positions[me.seat] === "electrical" && (
+          <button type="button" className={s.primary} onClick={onFixLights}>
+            Restore lights
+          </button>
+        )}
+
+        {canCallMeeting && (
+          <button type="button" className={s.meeting} onClick={onCallMeeting}>
+            Emergency meeting
+          </button>
+        )}
       </div>
 
       {/* ── task list ────────────────────────────────────────────────── */}
