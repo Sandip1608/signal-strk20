@@ -47,3 +47,6 @@ A1priv/A1priv.ts
 
 # cairo build artifacts
 /cairo/target/
+
+# Deploy credentials — never commit
+.env.deploy

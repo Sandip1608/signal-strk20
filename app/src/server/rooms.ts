@@ -1,0 +1,400 @@
+/**
+ * In-memory room store for cross-device play.
+ *
+ * A stopgap, and worth being honest about what it is: the real shared state
+ * for this game is meant to be `SignalRound` on Starknet — that is the whole
+ * premise of the project. This relay exists so two people on two machines can
+ * play before the contracts are deployed. It earns nothing in the judging and
+ * should not grow into a second source of truth.
+ *
+ * Two properties it does have to get right:
+ *
+ *  1. **The server runs the engine.** Clients post *actions*, never state.
+ *     `engine.ts` and `ship.ts` are pure and React-free, so they import
+ *     straight in here and every client agrees by construction. If clients
+ *     applied moves locally and pushed state, two simultaneous votes would
+ *     race and one would be silently lost.
+ *
+ *  2. **State is redacted per viewer.** A client only receives its own role,
+ *     its own burner key, and only the crewmates standing in its own room.
+ *     Without that, anyone could read the impostor out of the network tab —
+ *     which would make the game's central claim false in the demo.
+ *
+ * State lives in module memory, so it survives hot reloads via `globalThis`
+ * but not a server restart, and it will NOT work across serverless instances
+ * (Vercel). Run this on one long-lived process — `npm run dev` or `npm start`.
+ */
+
+import * as engine from "@/game/engine";
+import * as ship from "@/game/ship";
+import { nextBotAction, nextNightAction } from "@/game/bots";
+import {
+  combinedSeed,
+  deriveHidden,
+  generateSessionKey,
+  placeholderPayoutNote,
+  placeholderWallet,
+  poseidonCommitment,
+  randomEntropy,
+  randomSalt,
+  seedCommitment,
+} from "@/game/crypto";
+import { Phase, type GameState, type Seat } from "@/game/types";
+import type { RoomId, ShipState } from "@/game/ship";
+
+export type Room = {
+  code: string;
+  game: GameState;
+  ship: ShipState | null;
+  /** Host-only secrets. Never leave the server until `resolve_round` opens them. */
+  hiddenSeats: number[];
+  salt: string;
+  hostSeed: string;
+  /** Bumps on every change so clients can skip unchanged payloads. */
+  version: number;
+  /** playerId -> seat, so a browser reclaims its seat after a refresh. */
+  claims: Record<string, number>;
+  lastBotAt: number;
+  lastTouchedAt: number;
+};
+
+type Store = { rooms: Map<string, Room> };
+
+// Survive Next's dev hot-reload, which re-evaluates modules.
+const g = globalThis as unknown as { __signalRooms?: Store };
+const store: Store = (g.__signalRooms ??= { rooms: new Map() });
+
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no I/O/0/1
+const ROOM_TTL_MS = 3 * 60 * 60 * 1000;
+const BOT_INTERVAL_MS = 800;
+
+function newCode(): string {
+  let code = "";
+  do {
+    code = Array.from(
+      { length: 4 },
+      () => CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)],
+    ).join("");
+  } while (store.rooms.has(code));
+  return code;
+}
+
+function sweep() {
+  const now = Date.now();
+  for (const [code, room] of store.rooms) {
+    if (now - room.lastTouchedAt > ROOM_TTL_MS) store.rooms.delete(code);
+  }
+}
+
+export function createRoom(opts: {
+  nightDurationSecs: number;
+  voteDurationSecs: number;
+  variantKey?: string;
+  minPlayers?: number;
+  maxPlayers?: number;
+  hiddenCount?: number;
+}): Room {
+  sweep();
+  const code = newCode();
+  // Committed before the first player joins, so it cannot be aimed at anyone.
+  const hostSeed = randomSalt();
+  const room: Room = {
+    code,
+    game: engine.createGame({
+      host: "relay",
+      ...opts,
+      seedCommitment: seedCommitment(hostSeed),
+    }),
+    ship: null,
+    hiddenSeats: [],
+    salt: "",
+    hostSeed,
+    version: 1,
+    claims: {},
+    lastBotAt: 0,
+    lastTouchedAt: Date.now(),
+  };
+  store.rooms.set(code, room);
+  return room;
+}
+
+export function getRoom(code: string): Room | null {
+  return store.rooms.get(code.toUpperCase()) ?? null;
+}
+
+// ── actions ────────────────────────────────────────────────────────────────
+
+export type Action =
+  | { type: "join"; playerId: string; name: string }
+  | { type: "addBot" }
+  | { type: "assignRoles" }
+  | { type: "seeRole"; seat: number }
+  | { type: "startNight" }
+  | { type: "move"; seat: number; to: RoomId }
+  | { type: "task"; seat: number; taskId: string }
+  | { type: "kill"; seat: number; victim: number }
+  | { type: "report"; seat: number }
+  | { type: "skipNight" }
+  | { type: "vote"; seat: number; candidate: number }
+  | { type: "resolve" }
+  | { type: "payout" };
+
+/**
+ * Apply one action. Engine guards throw `ContractError`, which the route turns
+ * into a 409 carrying the contract's own message — so an illegal action on a
+ * remote client reads exactly like it does locally.
+ */
+export function applyAction(room: Room, action: Action): void {
+  const g0 = room.game;
+
+  switch (action.type) {
+    case "join": {
+      const session = generateSessionKey();
+      room.game = engine.join(g0, {
+        name: action.name,
+        wallet: placeholderWallet(),
+        sessionKey: session.publicKey,
+        sessionPrivateKey: session.privateKey,
+        payoutNoteId: placeholderPayoutNote(),
+        entropy: randomEntropy(),
+      });
+      room.claims[action.playerId] = room.game.seats.length - 1;
+      break;
+    }
+
+    case "addBot": {
+      const session = generateSessionKey();
+      room.game = engine.join(g0, {
+        name: botName(g0.seats),
+        isBot: true,
+        wallet: placeholderWallet(),
+        sessionKey: session.publicKey,
+        sessionPrivateKey: session.privateKey,
+        payoutNoteId: placeholderPayoutNote(),
+        entropy: randomEntropy(),
+      });
+      break;
+    }
+
+    case "assignRoles": {
+      const combined = combinedSeed(
+        room.hostSeed,
+        g0.seats.map((s) => s.entropy),
+      );
+      const hiddenSeats = deriveHidden(combined, g0.seats.length, g0.hiddenCount);
+      const salt = randomSalt();
+      room.game = engine.assignRoles(g0, {
+        hiddenSeats,
+        salt,
+        commitment: poseidonCommitment(hiddenSeats, salt),
+      });
+      room.hiddenSeats = hiddenSeats;
+      room.salt = salt;
+      break;
+    }
+
+    case "seeRole":
+      room.game = engine.markRoleSeen(g0, action.seat);
+      break;
+
+    case "startNight":
+      room.game = engine.startNight(g0);
+      room.ship = ship.initShip(room.game.seats.map((s) => s.seat));
+      break;
+
+    case "move":
+      if (room.ship) {
+        room.ship = ship.move(
+          room.ship,
+          action.seat,
+          action.to,
+          g0.seats.filter((s) => !s.dead).map((s) => s.seat),
+        );
+      }
+      break;
+
+    case "task":
+      if (room.ship) room.ship = ship.completeTask(room.ship, action.seat, action.taskId);
+      break;
+
+    case "kill":
+      room.game = engine.privateKill(g0, action.victim);
+      break;
+
+    case "report":
+      room.game = engine.reportNightKill(g0, engine.seatOf(g0, action.seat).sessionKey);
+      break;
+
+    case "skipNight":
+      room.game = engine.skipNight(g0);
+      break;
+
+    case "vote":
+      room.game = engine.handleVote(g0, { voterSeat: action.seat, candidateSeat: action.candidate });
+      break;
+
+    case "resolve": {
+      if (room.hiddenSeats.length === 0) throw new engine.ContractError("roles not assigned");
+      room.game = engine.resolveRound(g0, {
+        hiddenSeats: room.hiddenSeats,
+        salt: room.salt,
+        hostSeed: room.hostSeed,
+        recomputedCommitment: poseidonCommitment(room.hiddenSeats, room.salt),
+        recomputedSeedCommitment: seedCommitment(room.hostSeed),
+      });
+      break;
+    }
+
+    case "payout":
+      room.game = engine.payout(g0);
+      break;
+  }
+
+  room.version += 1;
+  room.lastTouchedAt = Date.now();
+}
+
+const BOT_NAMES = ["Nova", "Rhea", "Juno", "Atlas", "Vega", "Orion", "Lyra"];
+function botName(seats: Seat[]): string {
+  const taken = new Set(seats.map((s) => s.name));
+  return BOT_NAMES.find((n) => !taken.has(n)) ?? `Bot ${seats.length}`;
+}
+
+/**
+ * Advance bots at most one step, rate-limited.
+ *
+ * Driven lazily off client requests rather than a `setInterval`: a timer would
+ * keep every abandoned room ticking forever, and would not survive the module
+ * reloads that Next does in dev.
+ */
+export function tickBots(room: Room): void {
+  const now = Date.now();
+  if (now - room.lastBotAt < BOT_INTERVAL_MS) return;
+
+  const action =
+    room.game.phase === Phase.NIGHT
+      ? room.ship
+        ? nextNightAction(room.game, room.ship)
+        : null
+      : nextBotAction(room.game);
+  if (!action) return;
+
+  room.lastBotAt = now;
+  try {
+    switch (action.kind) {
+      case "seeRole":
+        applyAction(room, { type: "seeRole", seat: action.seat });
+        break;
+      case "kill":
+        applyAction(room, { type: "kill", seat: action.impostor, victim: action.victim });
+        break;
+      case "report":
+        applyAction(room, { type: "report", seat: action.seat });
+        break;
+      case "vote":
+        applyAction(room, { type: "vote", seat: action.voter, candidate: action.candidate });
+        break;
+      case "move":
+        applyAction(room, { type: "move", seat: action.seat, to: action.to });
+        break;
+      case "task":
+        applyAction(room, { type: "task", seat: action.seat, taskId: action.taskId });
+        break;
+    }
+  } catch {
+    // A bot racing a human (both voting the same tick) can lose; skip the beat.
+  }
+}
+
+// ── redaction ──────────────────────────────────────────────────────────────
+
+export type ViewerState = {
+  code: string;
+  version: number;
+  seat: number | null;
+  game: GameState;
+  ship: ShipState | null;
+};
+
+/**
+ * The state one player is allowed to see.
+ *
+ * Roles, burner private keys and other players' positions are stripped. This
+ * is the difference between "the impostor is hidden" and "the impostor is
+ * hidden unless you open devtools".
+ */
+export function viewFor(room: Room, seat: number | null): ViewerState {
+  const revealed = room.game.phase === Phase.RESOLVED;
+
+  const seats = room.game.seats.map((s) => {
+    const mine = s.seat === seat;
+    return {
+      ...s,
+      role: mine || revealed ? s.role : undefined,
+      sessionPrivateKey: mine ? s.sessionPrivateKey : "",
+      // The public key is fine to share — it is what `report_night_kill` is
+      // signed by and appears on-chain anyway.
+    };
+  });
+
+  let shipView: ShipState | null = null;
+  if (room.ship) {
+    const myRoom = seat === null ? null : room.ship.positions[seat];
+    const positions: Record<number, RoomId> = {};
+    for (const [k, v] of Object.entries(room.ship.positions)) {
+      const n = Number(k);
+      // Fog of war: you see yourself, and whoever shares your room.
+      if (n === seat || (myRoom !== null && v === myRoom)) positions[n] = v;
+    }
+    shipView = {
+      positions,
+      // Task lists are sent in full, deliberately. They carry no role
+      // information — the impostor gets a list too — and the shared crew
+      // progress bar is computed from all of them, so redacting them would
+      // show every player only their own three tasks as "the crew total".
+      tasks: room.ship.tasks,
+      sightings: room.ship.sightings.filter((s) => s.observer === seat),
+    };
+  }
+
+  return {
+    code: room.code,
+    version: room.version,
+    seat,
+    game: {
+      ...room.game,
+      seats,
+      // The team and the salt are the commitment's preimage: releasing either
+      // early would let a client compute who is hidden before the reveal.
+      hiddenSeats: revealed ? room.game.hiddenSeats : [],
+      salt: revealed ? room.game.salt : "",
+    },
+    ship: shipView,
+  };
+}
+
+export function seatOfPlayer(room: Room, playerId: string | null): number | null {
+  if (!playerId) return null;
+  const seat = room.claims[playerId];
+  return seat === undefined ? null : seat;
+}
+
+/**
+ * Make a view JSON-safe.
+ *
+ * `tallies` and `totalVotes` are `bigint` in the engine, and `JSON.stringify`
+ * throws outright on a bigint — without this every room response is a 500.
+ * They go out as strings and `online.ts` revives them.
+ */
+export function jsonSafe(view: ViewerState) {
+  return {
+    ...view,
+    game: {
+      ...view.game,
+      totalVotes: view.game.totalVotes.toString(),
+      tallies: Object.fromEntries(
+        Object.entries(view.game.tallies).map(([seat, n]) => [seat, n.toString()]),
+      ),
+    },
+  };
+}

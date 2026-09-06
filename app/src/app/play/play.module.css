@@ -1,0 +1,556 @@
+/* Signal — game surface.
+   The starter kit's landing page is a light "aurora" marketing theme; the game
+   deliberately is not. A hidden-role game is played in the dark, and the
+   contrast also makes the two surfaces obviously different things. */
+
+.shell {
+  --bg: #07070d;
+  --panel: #10111b;
+  --panel-2: #171826;
+  --line: #24263a;
+  --text: #e8e9f3;
+  --dim: #8b8da8;
+  --crew: #35d9c4;
+  --impostor: #ff4d5e;
+  --gold: #f5c451;
+  --glow: 0 0 0 1px var(--line), 0 18px 40px -22px #000;
+
+  min-height: 100vh;
+  background:
+    radial-gradient(900px 500px at 15% -10%, #17203a 0%, transparent 60%),
+    radial-gradient(700px 500px at 88% 0%, #2a1330 0%, transparent 55%),
+    var(--bg);
+  color: var(--text);
+  font-family: var(--font-body), system-ui, sans-serif;
+  padding: 24px 20px 64px;
+}
+
+.inner {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+/* ── header ─────────────────────────────────────────────────────────── */
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+
+.logo {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  margin-right: auto;
+}
+
+.logoDot {
+  color: var(--impostor);
+}
+
+.tagline {
+  color: var(--dim);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.backLink {
+  color: var(--dim);
+  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 14px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.backLink:hover {
+  color: var(--text);
+  border-color: #3b3e5c;
+}
+
+/* ── phase banner ───────────────────────────────────────────────────── */
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 18px;
+  margin-bottom: 18px;
+}
+
+.phasePill {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+.phaseLobby { color: var(--dim); }
+.phaseAssigned { color: var(--gold); }
+.phaseNight { color: #7f8bff; }
+.phaseVote { color: var(--crew); }
+.phaseResolved { color: var(--text); }
+
+.bannerText {
+  font-size: 14px;
+  color: var(--dim);
+}
+.bannerText strong { color: var(--text); font-weight: 600; }
+
+.clock {
+  margin-left: auto;
+  font-family: var(--font-mono-ui), monospace;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.clockLate { color: var(--impostor); }
+.clockLabel {
+  display: block;
+  font-family: var(--font-body), sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* ── layout ─────────────────────────────────────────────────────────── */
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: var(--glow);
+}
+
+.panelTitle {
+  font-size: 17px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.panelHint {
+  font-size: 13px;
+  color: var(--dim);
+  line-height: 1.55;
+  margin-bottom: 16px;
+}
+
+.section + .section { margin-top: 18px; }
+
+/* ── seats ──────────────────────────────────────────────────────────── */
+
+.seats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 10px;
+}
+
+.seat {
+  position: relative;
+  text-align: left;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 13px;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.1s, background 0.15s;
+}
+.seat:hover:not(:disabled) { border-color: #3d4166; transform: translateY(-1px); }
+.seat:disabled { cursor: not-allowed; opacity: 0.55; }
+
+.seatStatic { cursor: default; }
+.seatStatic:hover { transform: none; border-color: var(--line); }
+
+.seatSelected {
+  border-color: var(--crew);
+  background: #12241f;
+}
+
+.seatDead {
+  opacity: 0.5;
+}
+.seatDead .seatName { text-decoration: line-through; }
+
+.seatNum {
+  font-family: var(--font-mono-ui), monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+
+.seatName {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  margin: 3px 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seatMeta {
+  font-family: var(--font-mono-ui), monospace;
+  font-size: 10.5px;
+  color: var(--dim);
+}
+
+.seatTag {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 999px;
+}
+.tagDead { background: #3a1620; color: var(--impostor); }
+.tagVoted { background: #10231f; color: var(--crew); }
+.tagSeen { background: #2a2410; color: var(--gold); }
+.tagYou { background: #1b1f3d; color: #9aa4ff; }
+.tagBot { background: #241a33; color: #b78bff; }
+
+/* ── tally ──────────────────────────────────────────────────────────── */
+
+.tallyRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+}
+.tallyName {
+  width: 118px;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tallyBarWrap {
+  /* display:block — a bare <span> is inline, and width/height do not apply to
+     non-replaced inline boxes, so the fill inside would never render. */
+  display: block;
+  flex: 1;
+  height: 8px;
+  background: #0c0d16;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.tallyBar {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  background: linear-gradient(90deg, #1f6f63, var(--crew));
+  border-radius: 999px;
+  transition: width 0.35s ease;
+}
+.tallyNum {
+  width: 26px;
+  text-align: right;
+  font-family: var(--font-mono-ui), monospace;
+  font-size: 13px;
+  color: var(--dim);
+}
+
+/* ── buttons ────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 20px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: var(--crew);
+  color: #06231e;
+  font: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: filter 0.15s, transform 0.08s;
+}
+.btn:hover:not(:disabled) { filter: brightness(1.08); }
+.btn:active:not(:disabled) { transform: scale(0.985); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btnGhost {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--text);
+}
+.btnGhost:hover:not(:disabled) { border-color: #3d4166; background: var(--panel-2); }
+
+.btnDanger {
+  background: var(--impostor);
+  color: #2a0009;
+}
+
+.btnRow {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.input {
+  height: 42px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  min-width: 200px;
+  flex: 1;
+}
+.input:focus {
+  outline: none;
+  border-color: var(--crew);
+}
+.input::placeholder { color: #5f6280; }
+
+/* ── device gate (pass-the-device secrecy) ──────────────────────────── */
+
+.gate {
+  text-align: center;
+  padding: 34px 20px;
+  border: 1px dashed #333654;
+  border-radius: 14px;
+  background: #0c0d16;
+}
+.gateWho {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.gateHint {
+  font-size: 13px;
+  color: var(--dim);
+  margin-bottom: 18px;
+  line-height: 1.55;
+}
+
+.roleCard {
+  padding: 30px 20px;
+  border-radius: 14px;
+  text-align: center;
+  margin-bottom: 16px;
+}
+.roleCrew { background: linear-gradient(180deg, #10302a, #0b211d); border: 1px solid #1f6f63; }
+.roleImpostor { background: linear-gradient(180deg, #38121b, #250b12); border: 1px solid #7d2735; }
+
+.roleLabel {
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 8px;
+}
+.roleName {
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+.roleCrew .roleName { color: var(--crew); }
+.roleImpostor .roleName { color: var(--impostor); }
+.roleBlurb {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--dim);
+  line-height: 1.6;
+}
+
+/* ── activity log ───────────────────────────────────────────────────── */
+
+.log {
+  max-height: 460px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.logItem {
+  border-left: 2px solid var(--line);
+  padding: 0 0 0 11px;
+}
+.logPrivate { border-left-color: #6b4bd8; }
+
+.logCall {
+  font-family: var(--font-mono-ui), monospace;
+  font-size: 10.5px;
+  color: #7f83a8;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.logLock { color: #9b7bff; }
+
+.logText {
+  font-size: 12.5px;
+  color: var(--text);
+  line-height: 1.5;
+  margin-top: 3px;
+}
+
+.logEmpty {
+  font-size: 13px;
+  color: var(--dim);
+}
+
+/* ── misc ───────────────────────────────────────────────────────────── */
+
+.error {
+  background: #2c1017;
+  border: 1px solid #7d2735;
+  color: #ffb3bc;
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 13px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.errorCode {
+  font-family: var(--font-mono-ui), monospace;
+  font-weight: 700;
+}
+
+.note {
+  font-size: 12.5px;
+  color: var(--dim);
+  line-height: 1.6;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.note strong { color: var(--text); }
+
+.outcome {
+  text-align: center;
+  padding: 26px 18px;
+  border-radius: 14px;
+  margin-bottom: 18px;
+}
+.outcomeCrew { background: linear-gradient(180deg, #10302a, #0b211d); border: 1px solid #1f6f63; }
+.outcomeImpostor { background: linear-gradient(180deg, #38121b, #250b12); border: 1px solid #7d2735; }
+.outcomeTitle { font-size: 30px; font-weight: 800; letter-spacing: 0.04em; }
+.outcomeCrew .outcomeTitle { color: var(--crew); }
+.outcomeImpostor .outcomeTitle { color: var(--impostor); }
+.outcomeSub { font-size: 13.5px; color: var(--dim); margin-top: 8px; line-height: 1.6; }
+
+.kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.kv:last-child { border-bottom: none; }
+.kvKey { color: var(--dim); }
+.kvVal { font-family: var(--font-mono-ui), monospace; }
+
+/* ── crewmate lineup ────────────────────────────────────────────────── */
+
+/* Replaces the old seat card grid on every non-deck screen. Wraps rather than
+   scrolls, so seven crewmates still fit on a phone. */
+.crewRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  margin: 18px 0;
+}
+
+/* ── folded proof block ─────────────────────────────────────────────── */
+
+.proof {
+  margin-top: 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+.proofSummary {
+  cursor: pointer;
+  list-style: none;
+  padding: 11px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dim);
+  transition: color 0.15s;
+}
+.proofSummary::-webkit-details-marker { display: none; }
+.proofSummary::before {
+  content: "▸ ";
+  display: inline-block;
+  transition: transform 0.15s;
+}
+.proof[open] .proofSummary::before { transform: rotate(90deg); }
+.proofSummary:hover { color: var(--text); }
+.proofBody {
+  padding: 0 14px 14px;
+  border-top: 1px solid var(--line);
+}
+.proofBody .kv:first-of-type { padding-top: 12px; }
+
+/* ── online room bar ────────────────────────────────────────────────── */
+
+.roomBar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 1px solid #3a3560;
+  background: linear-gradient(180deg, #1c1733, #14111f);
+}
+.roomLabel {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.roomCode {
+  font-family: var(--font-mono-ui), monospace;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  text-indent: 0.28em;
+  color: #b78bff;
+}
+.roomBar .tagline { margin-right: auto; }
+.roomBar .btn { height: 34px; padding: 0 14px; font-size: 13px; }

@@ -6,6 +6,11 @@ edition = "2024_07"
 [dependencies]
 starknet = "2.20.1"
 
+[dev-dependencies]
+# Enables the #[test] attribute for `scarb cairo-test`. Starknet Foundry
+# publishes no Windows build, so the built-in runner is what we have.
+cairo_test = "2.20.1"
+
 [[target.starknet-contract]]
 sierra = true
 casm = true

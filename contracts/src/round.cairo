@@ -11,6 +11,86 @@
 /// locally-held burner EOA that signs all in-round actions. They must differ;
 /// `join` enforces that minimally by rejecting `session_key == caller`.
 
+use core::dict::{Felt252Dict, Felt252DictTrait};
+
+/// Derive the hidden team from a combined seed.
+///
+/// Partial Fisher-Yates over a dict, drawing `k` distinct seats out of `n`,
+/// returned ascending (the role commitment hashes the sequence, so the order
+/// has to be canonical).
+///
+/// Free function, not a contract method, so it can be unit-tested directly
+/// without spinning up contract state.
+pub fn derive_hidden(combined: felt252, n: u32, k: u32) -> Array<u32> {
+    assert(k <= n, 'k above n');
+
+    // pool[i] = i, then swap-remove as we draw.
+    let mut pool: Felt252Dict<u32> = Default::default();
+    let mut i: u32 = 0;
+    while i != n {
+        pool.insert(i.into(), i);
+        i += 1;
+    }
+
+    let mut chosen: Array<u32> = array![];
+    let mut t: u32 = 0;
+    while t != k {
+        let r = core::poseidon::poseidon_hash_span(array![combined, t.into()].span());
+        let r_u256: u256 = r.into();
+        let remaining: u32 = n - t;
+        let idx: u32 = (r_u256 % remaining.into()).try_into().unwrap();
+
+        chosen.append(Felt252DictTrait::get(ref pool, idx.into()));
+        // Swap the last live entry into the hole so every draw stays uniform.
+        let last = Felt252DictTrait::get(ref pool, (remaining - 1).into());
+        pool.insert(idx.into(), last);
+        t += 1;
+    }
+    pool.squash();
+
+    sort_ascending(chosen)
+}
+
+/// Selection sort. `k` is at most a handful of seats, so this is fine and is
+/// far easier to read than anything cleverer.
+fn sort_ascending(xs: Array<u32>) -> Array<u32> {
+    let n = xs.len();
+    let mut remaining = xs;
+    let mut out: Array<u32> = array![];
+
+    let mut placed: u32 = 0;
+    while placed != n {
+        // find the smallest still in `remaining`
+        let mut best: u32 = *remaining.at(0);
+        let mut j: u32 = 1;
+        while j != remaining.len() {
+            let v = *remaining.at(j);
+            if v < best {
+                best = v;
+            }
+            j += 1;
+        }
+        out.append(best);
+
+        // rebuild without one copy of `best`
+        let mut next: Array<u32> = array![];
+        let mut dropped = false;
+        let mut m: u32 = 0;
+        while m != remaining.len() {
+            let v = *remaining.at(m);
+            if v == best && !dropped {
+                dropped = true;
+            } else {
+                next.append(v);
+            }
+            m += 1;
+        }
+        remaining = next;
+        placed += 1;
+    }
+    out
+}
+
 pub mod phases {
     pub const LOBBY: u8 = 0;
     pub const ASSIGNED: u8 = 1;
@@ -33,14 +113,25 @@ pub mod SignalRound {
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
     use super::phases;
 
-    pub const MIN_PLAYERS: u32 = 5;
-    pub const MAX_PLAYERS: u32 = 7;
+    /// RFP bounds. A round configures its own limits inside these.
+    pub const FLOOR_PLAYERS: u32 = 3;
+    pub const CEIL_PLAYERS: u32 = 15;
 
     #[storage]
     struct Storage {
         host: ContractAddress,
         escrow: ContractAddress,
         phase: u8,
+        // -- variant configuration --
+        // The RFP asks for one platform covering Among Us, Secret Hitler,
+        // Avalon, Blood on the Clocktower and One Night Werewolf. What those
+        // share is the skeleton this contract implements: a hidden minority,
+        // a private night action, and an anonymous vote. They differ in table
+        // size and how large the hidden team is, so those are constructor
+        // configuration rather than forks of the contract.
+        min_players: u32,
+        max_players: u32,
+        hidden_count: u32,
         // -- lobby --
         player_count: u32,
         seats: Map<u32, ContractAddress>, // seat -> lobby-join wallet
@@ -48,8 +139,13 @@ pub mod SignalRound {
         session_key_seat: Map<ContractAddress, u32>, // signer -> seat + 1 (0 = none)
         payout_notes: Map<u32, felt252>, // seat -> pre-created STRK20 open-note id
         joined: Map<ContractAddress, bool>,
+        // -- fair randomness --
+        // Committed by the host in the constructor, i.e. before anyone joins
+        // and before any player entropy exists. See `resolve_round`.
+        seed_commitment: felt252,
+        entropy: Map<u32, felt252>, // seat -> that player's public contribution
         // -- roles --
-        role_commitment: felt252, // poseidon(impostor_seat, salt), posted by host
+        role_commitment: felt252, // poseidon(hidden_seats.., salt), posted by host
         // -- night --
         night_duration: u64,
         night_deadline: u64,
@@ -62,7 +158,8 @@ pub mod SignalRound {
         total_votes: u256,
         // -- resolution --
         ejected: u32, // seat + 1, 0 = tie / nobody ejected
-        impostor: u32, // seat + 1, revealed at resolve
+        impostor: u32, // first hidden seat + 1, revealed at resolve
+        hidden: Map<u32, bool>, // seat -> on the hidden team, filled at resolve
         crew_won: bool,
     }
 
@@ -121,13 +218,36 @@ pub mod SignalRound {
         crew_won: bool,
     }
 
+    /// `hidden_count` is how many players are on the hidden team: 1 impostor
+    /// for Among Us, 2 werewolves for a larger One Night Werewolf table, the
+    /// fascist count for Secret Hitler, and so on. It must stay a strict
+    /// minority, or the vote cannot be a meaningful check on it.
     #[constructor]
     fn constructor(
-        ref self: ContractState, host: ContractAddress, night_duration: u64, vote_duration: u64,
+        ref self: ContractState,
+        host: ContractAddress,
+        seed_commitment: felt252,
+        min_players: u32,
+        max_players: u32,
+        hidden_count: u32,
+        night_duration: u64,
+        vote_duration: u64,
     ) {
         assert(host.is_non_zero(), 'host required');
+        assert(seed_commitment != 0, 'seed commitment required');
+        assert(min_players >= FLOOR_PLAYERS, 'min too small');
+        assert(max_players <= CEIL_PLAYERS, 'max too large');
+        assert(min_players <= max_players, 'min above max');
+        assert(hidden_count >= 1, 'need a hidden team');
+        // Strict minority: 2 * hidden < min_players.
+        assert(hidden_count * 2 < min_players, 'hidden team too large');
+
         self.host.write(host);
+        self.seed_commitment.write(seed_commitment);
         self.phase.write(phases::LOBBY);
+        self.min_players.write(min_players);
+        self.max_players.write(max_players);
+        self.hidden_count.write(hidden_count);
         self.night_duration.write(night_duration);
         self.vote_duration.write(vote_duration);
     }
@@ -165,11 +285,15 @@ pub mod SignalRound {
             if self.phase.read() != phases::RESOLVED {
                 return false;
             }
-            let impostor_seat = self.impostor.read() - 1;
+            if seat >= self.player_count.read() {
+                return false;
+            }
+            // Crew win pays every non-hidden seat, dead crew included; a hidden
+            // win pays the whole hidden team.
             if self.crew_won.read() {
-                seat != impostor_seat && seat < self.player_count.read()
+                !self.hidden.read(seat)
             } else {
-                seat == impostor_seat
+                self.hidden.read(seat)
             }
         }
 
@@ -207,7 +331,12 @@ pub mod SignalRound {
         /// `session_key` is the burner EOA that will sign this player's
         /// in-round actions; `payout_note_id` is a pre-created STRK20 open
         /// note (phase 5, CreateOpenNote) the payout will land in.
-        fn join(ref self: ContractState, session_key: ContractAddress, payout_note_id: felt252) {
+        fn join(
+            ref self: ContractState,
+            session_key: ContractAddress,
+            payout_note_id: felt252,
+            entropy: felt252,
+        ) {
             assert(self.phase.read() == phases::LOBBY, 'not in lobby');
             let caller = get_caller_address();
             assert(!self.joined.read(caller), 'already joined');
@@ -217,12 +346,14 @@ pub mod SignalRound {
             assert(session_key != caller, 'session key = wallet');
             assert(self.session_key_seat.read(session_key) == super::NO_SEAT, 'session key taken');
             assert(payout_note_id != 0, 'payout note required');
+            assert(entropy != 0, 'entropy required');
             let seat = self.player_count.read();
-            assert(seat < MAX_PLAYERS, 'lobby full');
+            assert(seat < self.max_players.read(), 'lobby full');
             self.seats.write(seat, caller);
             self.session_keys.write(seat, session_key);
             self.session_key_seat.write(session_key, seat + 1);
             self.payout_notes.write(seat, payout_note_id);
+            self.entropy.write(seat, entropy);
             self.joined.write(caller, true);
             self.player_count.write(seat + 1);
             self.emit(Joined { seat, wallet: caller, session_key });
@@ -235,7 +366,7 @@ pub mod SignalRound {
         fn assign_roles(ref self: ContractState, role_commitment: felt252) {
             self.assert_host();
             assert(self.phase.read() == phases::LOBBY, 'not in lobby');
-            assert(self.player_count.read() >= MIN_PLAYERS, 'need 5+ players');
+            assert(self.player_count.read() >= self.min_players.read(), 'not enough players');
             assert(role_commitment != 0, 'commitment required');
             self.role_commitment.write(role_commitment);
             self.phase.write(phases::ASSIGNED);
@@ -281,21 +412,84 @@ pub mod SignalRound {
         /// posted in `assign_roles`. Ejection = strict-max tally; a tie ejects
         /// nobody, so the impostor survives and the crew lose. Provably fair:
         /// the host cannot pick a different impostor after seeing the vote.
-        fn resolve_round(ref self: ContractState, impostor_seat: u32, salt: felt252) {
+        /// Opens the commitment over the whole hidden team.
+        ///
+        /// `hidden_seats` must be strictly ascending: the commitment is a hash
+        /// of the sequence, so without a canonical order the same team would
+        /// have many valid preimages and the host could pick whichever one
+        /// suited the tally.
+        ///
+        /// For a one-impostor game this is byte-identical to the old
+        /// `poseidon(impostor_seat, salt)`, so existing rounds still open.
+        /// Opens the round.
+        ///
+        /// The hidden team is **derived, not asserted**. The host reveals only
+        /// `host_seed`; the contract checks it against the commitment posted in
+        /// the constructor, mixes it with every player's entropy, and computes
+        /// the team itself.
+        ///
+        /// That ordering is the whole point. The host commits to their seed
+        /// before anyone has joined, so they cannot aim it at a particular
+        /// person; each player then contributes entropy the host cannot predict.
+        /// Neither side can steer the draw alone, which is what the previous
+        /// version — where the host simply named the team — could not claim.
+        fn resolve_round(ref self: ContractState, host_seed: felt252, salt: felt252) {
             self.assert_host();
             assert(self.phase.read() == phases::VOTE, 'not in vote phase');
             assert(get_block_timestamp() > self.vote_deadline.read(), 'vote still open');
-            assert(impostor_seat < self.player_count.read(), 'bad impostor seat');
-            let commitment = poseidon_hash_span(array![impostor_seat.into(), salt].span());
-            assert(commitment == self.role_commitment.read(), 'commitment mismatch');
+            assert(
+                poseidon_hash_span(array![host_seed].span()) == self.seed_commitment.read(),
+                'seed mismatch',
+            );
+
+            let n = self.player_count.read();
+            let k = self.hidden_count.read();
+
+            // combined = poseidon(host_seed, entropy_0, .., entropy_{n-1})
+            let mut mix: Array<felt252> = array![host_seed];
+            let mut e: u32 = 0;
+            while e != n {
+                mix.append(self.entropy.read(e));
+                e += 1;
+            }
+            let combined = poseidon_hash_span(mix.span());
+            let hidden_seats = super::derive_hidden(combined, n, k).span();
+
+            // The role commitment still has to match: it binds the notes the
+            // host actually handed out to the team the seed produces.
+            let mut data: Array<felt252> = array![];
+            let mut i: u32 = 0;
+            while i != hidden_seats.len() {
+                data.append((*hidden_seats.at(i)).into());
+                i += 1;
+            }
+            data.append(salt);
+            assert(
+                poseidon_hash_span(data.span()) == self.role_commitment.read(),
+                'commitment mismatch',
+            );
+
+            let mut j: u32 = 0;
+            while j != hidden_seats.len() {
+                self.hidden.write(*hidden_seats.at(j), true);
+                j += 1;
+            }
 
             let ejected = self.compute_ejected();
-            let crew_won = ejected == impostor_seat + 1;
+            // Crew win by ejecting anyone from the hidden team.
+            let crew_won = ejected != super::NO_SEAT && self.hidden.read(ejected - 1);
             self.ejected.write(ejected);
-            self.impostor.write(impostor_seat + 1);
+            self.impostor.write(*hidden_seats.at(0) + 1);
             self.crew_won.write(crew_won);
             self.phase.write(phases::RESOLVED);
-            self.emit(RoundResolved { impostor_seat, ejected_seat_plus_one: ejected, crew_won });
+            self
+                .emit(
+                    RoundResolved {
+                        impostor_seat: *hidden_seats.at(0),
+                        ejected_seat_plus_one: ejected,
+                        crew_won,
+                    },
+                );
         }
 
         // -- views --
@@ -344,11 +538,37 @@ pub mod SignalRound {
             if self.phase.read() != phases::RESOLVED {
                 return 0;
             }
+            let hidden = self.hidden_count.read();
             if self.crew_won.read() {
-                self.player_count.read() - 1
+                self.player_count.read() - hidden
             } else {
-                1
+                hidden
             }
+        }
+
+        fn min_players(self: @ContractState) -> u32 {
+            self.min_players.read()
+        }
+
+        fn max_players(self: @ContractState) -> u32 {
+            self.max_players.read()
+        }
+
+        fn hidden_count(self: @ContractState) -> u32 {
+            self.hidden_count.read()
+        }
+
+        fn seed_commitment(self: @ContractState) -> felt252 {
+            self.seed_commitment.read()
+        }
+
+        fn entropy_of(self: @ContractState, seat: u32) -> felt252 {
+            self.entropy.read(seat)
+        }
+
+        /// Only meaningful once resolved; false before then.
+        fn is_hidden(self: @ContractState, seat: u32) -> bool {
+            self.hidden.read(seat)
         }
     }
 
@@ -404,12 +624,17 @@ pub mod SignalRound {
 #[starknet::interface]
 pub trait ISignalRoundGame<T> {
     fn set_escrow(ref self: T, escrow: starknet::ContractAddress);
-    fn join(ref self: T, session_key: starknet::ContractAddress, payout_note_id: felt252);
+    fn join(
+        ref self: T,
+        session_key: starknet::ContractAddress,
+        payout_note_id: felt252,
+        entropy: felt252,
+    );
     fn assign_roles(ref self: T, role_commitment: felt252);
     fn start_night(ref self: T);
     fn report_night_kill(ref self: T);
     fn skip_night(ref self: T);
-    fn resolve_round(ref self: T, impostor_seat: u32, salt: felt252);
+    fn resolve_round(ref self: T, host_seed: felt252, salt: felt252);
     fn host(self: @T) -> starknet::ContractAddress;
     fn escrow(self: @T) -> starknet::ContractAddress;
     fn seat_address(self: @T, seat: u32) -> starknet::ContractAddress;
@@ -421,4 +646,10 @@ pub trait ISignalRoundGame<T> {
     fn deadlines(self: @T) -> (u64, u64);
     fn crew_won(self: @T) -> bool;
     fn winner_count(self: @T) -> u32;
+    fn min_players(self: @T) -> u32;
+    fn max_players(self: @T) -> u32;
+    fn hidden_count(self: @T) -> u32;
+    fn seed_commitment(self: @T) -> felt252;
+    fn entropy_of(self: @T, seat: u32) -> felt252;
+    fn is_hidden(self: @T, seat: u32) -> bool;
 }

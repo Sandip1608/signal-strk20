@@ -1,0 +1,73 @@
+.mate {
+  display: block;
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.45));
+  transition: transform 0.16s ease, filter 0.16s ease;
+}
+
+/* Dead crewmates lie on their side, the way a body reads at a glance. */
+.dead {
+  transform: rotate(90deg) translateY(6%);
+  filter: grayscale(0.55) drop-shadow(0 6px 10px rgba(0, 0, 0, 0.45));
+  opacity: 0.75;
+}
+
+/* Dims a crewmate that is out of play or on the losing side — enough to
+   recede behind the ones that matter, not so much that you cannot read them. */
+.faded {
+  opacity: 0.62;
+  filter: grayscale(0.45);
+}
+
+/* ── card ───────────────────────────────────────────────────────────── */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 8px 12px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  min-width: 88px;
+}
+
+.cardBtn {
+  cursor: pointer;
+  transition: background 0.14s, border-color 0.14s, transform 0.1s;
+}
+.cardBtn:hover:not(:disabled) {
+  background: #171826;
+  border-color: #3d4166;
+  transform: translateY(-2px);
+}
+.cardBtn:hover:not(:disabled) .mate {
+  transform: translateY(-2px) scale(1.04);
+}
+.cardBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.cardSelected {
+  background: #12241f;
+  border-color: #35d9c4;
+}
+
+.name {
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag {
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8b8da8;
+}

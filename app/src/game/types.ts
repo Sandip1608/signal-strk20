@@ -1,0 +1,152 @@
+/**
+ * Types mirroring `contracts/src/round.cairo`.
+ *
+ * Field names and semantics follow the Cairo storage exactly — including the
+ * `seat + 1` sentinel encoding (0 = "nobody"), which is preserved rather than
+ * normalised to -1 so that a value read straight off the contract can be
+ * dropped in without translation.
+ */
+
+/** `round.cairo::phases`. */
+export const Phase = {
+  LOBBY: 0,
+  ASSIGNED: 1,
+  NIGHT: 2,
+  VOTE: 3,
+  RESOLVED: 4,
+} as const;
+
+export type PhaseValue = (typeof Phase)[keyof typeof Phase];
+
+export const PHASE_LABEL: Record<PhaseValue, string> = {
+  [Phase.LOBBY]: "Lobby",
+  [Phase.ASSIGNED]: "Roles assigned",
+  [Phase.NIGHT]: "Night",
+  [Phase.VOTE]: "Vote",
+  [Phase.RESOLVED]: "Resolved",
+};
+
+/** `SignalRound::FLOOR_PLAYERS` / `CEIL_PLAYERS` — the outer bounds any
+ * variant must sit inside. Per-round limits come from the variant config. */
+export const FLOOR_PLAYERS = 3;
+export const CEIL_PLAYERS = 15;
+
+/** `round.cairo::NO_SEAT` — the 0 sentinel in `seat + 1` fields. */
+export const NO_SEAT = 0;
+
+/**
+ * "IMPOSTOR" is the hidden team in every variant; the display name (Werewolf,
+ * Fascist, Minion of Mordred) comes from the variant config, so the engine
+ * only ever reasons about hidden-vs-not.
+ */
+export type Role = "CREW" | "IMPOSTOR";
+
+/**
+ * One seat. `wallet` is the lobby-join address that shielded the buy-in;
+ * `sessionKey` is the burner that signs in-round actions. The contract rejects
+ * `join` when they are equal — that inequality is the whole unlinkability
+ * claim, so it is enforced client-side too rather than only on-chain.
+ */
+export type Seat = {
+  seat: number;
+  /** Display handle. Purely local — the contract stores no names. */
+  name: string;
+  /**
+   * Filled by the bot driver rather than a person. Purely a client concern —
+   * on-chain a bot seat is an ordinary seat with its own burner key, and the
+   * contract cannot tell the difference.
+   */
+  isBot: boolean;
+  wallet: string;
+  sessionKey: string;
+  /** Burner private key, held only in this browser. Never sent anywhere. */
+  sessionPrivateKey: string;
+  /** Pre-created STRK20 open note (phase 5) the payout lands in. */
+  payoutNoteId: string;
+  /** Public randomness this player contributed at `join`. */
+  entropy: string;
+  dead: boolean;
+  /**
+   * Delivered as a 0-value encrypted note only this holder can decrypt.
+   * Undefined until the host assigns roles.
+   */
+  role?: Role;
+  /** Whether this player has opened their role note yet. */
+  roleSeen: boolean;
+  /** Whether this seat's anonymous vote leg has been submitted. */
+  hasVoted: boolean;
+};
+
+export type GameState = {
+  host: string;
+  escrow: string;
+  phase: PhaseValue;
+
+  /** Variant configuration — the contract's constructor arguments. */
+  variantKey: string;
+  minPlayers: number;
+  maxPlayers: number;
+  hiddenCount: number;
+
+  seats: Seat[];
+
+  /**
+   * poseidon(host_seed) — posted in the constructor, before anyone joins, so
+   * the host cannot aim the draw at a particular player.
+   */
+  seedCommitment: string;
+  /** poseidon(hidden_seats…, salt), posted by the host in `assign_roles`. */
+  roleCommitment: string;
+  /**
+   * Host-only secrets backing the commitment. Never leaves the host's client.
+   * Ascending order is required — the commitment hashes the sequence, so
+   * without a canonical order a team would have many valid preimages.
+   */
+  hiddenSeats: number[];
+  salt: string;
+  /** Host-only until `resolve_round` reveals it. */
+  hostSeed: string;
+
+  nightDurationSecs: number;
+  voteDurationSecs: number;
+  /** Unix ms. 0 = not started. */
+  nightDeadline: number;
+  voteDeadline: number;
+
+  /** `seat + 1`; 0 = nobody died. */
+  nightVictim: number;
+  /**
+   * `seat + 1` of a player who has been sent the kill note but has not yet
+   * self-reported; 0 = none.
+   *
+   * This has no on-chain counterpart *by design* — it mirrors a note sitting
+   * undecrypted in the victim's inbox inside the pool. The round contract
+   * genuinely does not know a kill happened until `report_night_kill`.
+   */
+  pendingVictim: number;
+
+  /** seat -> accumulated vote weight. Public by design (RFP wants a computable tally). */
+  tallies: Record<number, bigint>;
+  totalVotes: bigint;
+
+  /** `seat + 1`; 0 = tie / nobody ejected. */
+  ejected: number;
+  /** `seat + 1`; 0 until resolved. */
+  impostorRevealed: number;
+  crewWon: boolean;
+
+  /** Append-only log of every action, for the demo reel and for debugging. */
+  log: LogEntry[];
+};
+
+export type LogEntry = {
+  at: number;
+  /** Which on-chain call this corresponds to, or `pool` for in-pool actions. */
+  call: string;
+  text: string;
+  /** Actions that are private in the real system are marked so the UI can say so. */
+  private?: boolean;
+};
+
+/** The buy-in / vote weight unit. One seat, one vote of equal weight in v1. */
+export const VOTE_WEIGHT = 1n;

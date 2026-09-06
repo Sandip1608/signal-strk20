@@ -91,6 +91,37 @@
   line-height: 1.5;
 }
 
+/* --- Play CTA ------------------------------------------------------------ */
+/* The starter kit demonstrates the primitives; Signal is what we built on top
+   of them. This is the only link between the two surfaces. */
+.playCta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 24px;
+  padding: 13px 22px;
+  border-radius: 999px;
+  background: #0b0a14;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  transition: transform 0.12s, box-shadow 0.18s;
+  box-shadow: 0 10px 26px -14px #0b0a14;
+}
+.playCta:hover { transform: translateY(-1px); box-shadow: 0 16px 32px -14px #0b0a14; }
+.playCtaDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff4d5e;
+}
+.playCtaSub {
+  display: block;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 /* --- Network status dots ------------------------------------------------ */
 .netDot { width: 7px; height: 7px; border-radius: 50%; }
 .netOk { color: var(--green); }

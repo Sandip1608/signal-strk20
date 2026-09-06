@@ -1,0 +1,425 @@
+"use client";
+
+/**
+ * Client-side game store.
+ *
+ * Holds the `GameState` the engine operates on, plus the small amount of UI
+ * state that has no on-chain counterpart: who is currently holding the device
+ * (`viewerSeat`) and whether their secret is currently uncovered.
+ *
+ * v1 is pass-the-device: one browser, players take turns. A lobby shared
+ * across machines needs an indexer or a relay for the encrypted notes, which
+ * is out of scope for the sprint (docs/TIMELINE.md). Everything that *would*
+ * be a transaction goes through the engine, so the wiring seam is one layer.
+ */
+
+import { create } from "zustand";
+import * as engine from "./engine";
+import {
+  combinedSeed,
+  deriveHidden,
+  generateSessionKey,
+  placeholderPayoutNote,
+  placeholderWallet,
+  poseidonCommitment,
+  randomEntropy,
+  randomSalt,
+  seedCommitment,
+} from "./crypto";
+import { nextBotName, type BotAction } from "./bots";
+import * as ship from "./ship";
+import type { RoomId, ShipState } from "./ship";
+import * as online from "./online";
+import { Phase, type GameState } from "./types";
+
+type Store = {
+  game: GameState | null;
+  /** Seat currently holding the device. null = nobody / host view. */
+  viewerSeat: number | null;
+  /** Secrets stay covered until the holder explicitly uncovers them. */
+  revealed: boolean;
+  /**
+   * Rooms, tasks and sightings. Kept beside `game` rather than inside it
+   * because none of it exists on-chain — see the note atop `ship.ts`.
+   */
+  ship: ShipState | null;
+  error: string | null;
+
+  /**
+   * "local" is pass-the-device on one screen. "online" relays every action to
+   * the server, which runs the same engine and returns a redacted view — so
+   * the panels below never learn which mode they are in.
+   */
+  mode: "local" | "online";
+  roomCode: string | null;
+  /** Our own seat in an online room; null until we have joined one. */
+  mySeat: number | null;
+  connecting: boolean;
+
+  newGame: (opts: { nightDurationSecs: number; voteDurationSecs: number; variantKey?: string; minPlayers?: number; maxPlayers?: number; hiddenCount?: number }) => void;
+  resetGame: () => void;
+
+  addPlayer: (name: string, isBot?: boolean) => void;
+  addBot: () => void;
+  fillWithBots: () => void;
+  assignRoles: () => void;
+  startNight: () => void;
+  kill: (victimSeat: number) => void;
+  report: (seat: number) => void;
+  skipNight: () => void;
+  vote: (voterSeat: number, candidateSeat: number) => void;
+  /** Apply one bot action. Deliberately leaves viewer/reveal state alone. */
+  botAct: (action: BotAction) => void;
+  moveTo: (seat: number, to: RoomId) => void;
+  completeTask: (seat: number, taskId: string) => void;
+  resolve: () => void;
+  payout: () => void;
+
+  setViewer: (seat: number | null) => void;
+  reveal: () => void;
+  cover: () => void;
+  seeRole: (seat: number) => void;
+  clearError: () => void;
+
+  hostRoom: (name: string, opts: { nightDurationSecs: number; voteDurationSecs: number; variantKey?: string; minPlayers?: number; maxPlayers?: number; hiddenCount?: number }) => Promise<void>;
+  joinRoom: (code: string, name: string) => Promise<void>;
+  leaveRoom: () => void;
+  applyView: (view: online.RoomView) => void;
+  send: (action: Record<string, unknown>) => Promise<void>;
+};
+
+const HOST = "0xhost";
+
+/** The local host's secret seed. Module-scoped rather than stored in
+ * `GameState`, because `GameState` is the mirror of public contract state
+ * and the seed must not appear there before the reveal. */
+const hostSeedRef = { current: "" };
+
+/**
+ * Run an engine transition, surfacing a `ContractError` as UI state instead of
+ * throwing — an illegal action should read like a rejected transaction, not
+ * crash the app.
+ */
+function apply(set: (fn: (s: Store) => Partial<Store>) => void, fn: (g: GameState) => GameState) {
+  set((s) => {
+    if (!s.game) return {};
+    try {
+      return { game: fn(s.game), error: null };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+}
+
+export const useGame = create<Store>((set, get) => ({
+  game: null,
+  viewerSeat: null,
+  revealed: false,
+  ship: null,
+  error: null,
+  mode: "local",
+  roomCode: null,
+  mySeat: null,
+  connecting: false,
+
+  newGame: (opts) =>
+    set({
+      // The host's seed is committed before anyone joins; it is kept out of
+            // `GameState` (which is the public mirror) until the reveal.
+            game: engine.createGame({
+              host: HOST,
+              ...opts,
+              seedCommitment: seedCommitment((hostSeedRef.current = randomSalt())),
+            }),
+      viewerSeat: null,
+      revealed: false,
+      ship: null,
+      error: null,
+    }),
+
+  resetGame: () =>
+    set({ game: null, viewerSeat: null, revealed: false, ship: null, error: null }),
+
+  /**
+   * Join a seat. The burner keypair is generated here and the wallet address
+   * is a placeholder until the wallet connector is wired — but the crucial
+   * invariant (`session_key != wallet`) holds from the start, because the two
+   * come from independent keypairs.
+   */
+  addPlayer: (name, isBot = false) => {
+    if (get().mode === "online") {
+      void get().send({ type: "join", name });
+      return;
+    }
+    const session = generateSessionKey();
+    apply(set, (g) =>
+      engine.join(g, {
+        name,
+        isBot,
+        wallet: placeholderWallet(),
+        sessionKey: session.publicKey,
+        sessionPrivateKey: session.privateKey,
+        payoutNoteId: placeholderPayoutNote(),
+        entropy: randomEntropy(),
+      }),
+    );
+  },
+
+  addBot: () => {
+    if (get().mode === "online") {
+      void get().send({ type: "addBot" });
+      return;
+    }
+    const g = get().game;
+    if (!g) return;
+    get().addPlayer(nextBotName(g.seats), true);
+  },
+
+  /** Top the lobby up to the minimum so one person can start a round alone. */
+  fillWithBots: () => {
+    const g = get().game;
+    if (!g) return;
+    for (let i = g.seats.length; i < g.minPlayers; i += 1) {
+      get().addBot();
+    }
+  },
+
+  /** Host draws the impostor, commits to it, and sends the encrypted notes. */
+  assignRoles: () => {
+    if (get().mode === "online") {
+      void get().send({ type: "assignRoles" });
+      return;
+    }
+    const g = get().game;
+    if (!g) return;
+    // Derived from the committed host seed mixed with every player's entropy,
+            // exactly as `resolve_round` will recompute it.
+            const combined = combinedSeed(
+              hostSeedRef.current,
+              g.seats.map((s) => s.entropy),
+            );
+            const hiddenSeats = deriveHidden(combined, g.seats.length, g.hiddenCount);
+            const salt = randomSalt();
+    const commitment = poseidonCommitment(hiddenSeats, salt);
+    apply(set, (s) => engine.assignRoles(s, { hiddenSeats, salt, commitment }));
+    set({ viewerSeat: null, revealed: false });
+  },
+
+  startNight: () => {
+    if (get().mode === "online") {
+      void get().send({ type: "startNight" });
+      return;
+    }
+    apply(set, (g) => engine.startNight(g));
+    const g = get().game;
+    set({
+      viewerSeat: null,
+      revealed: false,
+      ship: g ? ship.initShip(g.seats.map((x) => x.seat)) : null,
+    });
+  },
+
+  /** Walk one room. Sightings are recorded by the ship reducer. */
+  moveTo: (seat, to) => {
+    if (get().mode === "online") {
+      void get().send({ type: "move", to });
+      return;
+    }
+    set((st) => {
+      if (!st.ship || !st.game) return {};
+      const living = st.game.seats.filter((x) => !x.dead).map((x) => x.seat);
+      return { ship: ship.move(st.ship, seat, to, living) };
+    });
+  },
+
+  completeTask: (seat, taskId) => {
+    if (get().mode === "online") {
+      void get().send({ type: "task", taskId });
+      return;
+    }
+    set((st) => (st.ship ? { ship: ship.completeTask(st.ship, seat, taskId) } : {}));
+  },
+
+  kill: (victimSeat) => {
+    if (get().mode === "online") {
+      void get().send({ type: "kill", victim: victimSeat });
+      return;
+    }
+    apply(set, (g) => engine.privateKill(g, victimSeat));
+  },
+
+  report: (seat) => {
+    if (get().mode === "online") {
+      void get().send({ type: "report" });
+      return;
+    }
+    apply(set, (g) => {
+      const s = engine.seatOf(g, seat);
+      return engine.reportNightKill(g, s.sessionKey);
+    });
+  },
+
+  skipNight: () => {
+    if (get().mode === "online") {
+      void get().send({ type: "skipNight" });
+      return;
+    }
+    apply(set, (g) => engine.skipNight(g));
+  },
+
+  vote: (voterSeat, candidateSeat) => {
+    if (get().mode === "online") {
+      void get().send({ type: "vote", candidate: candidateSeat });
+      return;
+    }
+    apply(set, (g) => engine.handleVote(g, { voterSeat, candidateSeat }));
+    set({ viewerSeat: null, revealed: false });
+  },
+
+  /** Host opens the commitment. Recomputed here so a mismatch is caught. */
+  resolve: () => {
+    if (get().mode === "online") {
+      void get().send({ type: "resolve" });
+      return;
+    }
+    const g = get().game;
+    if (!g || g.hiddenSeats.length === 0) return;
+    apply(set, (s) =>
+      engine.resolveRound(s, {
+        hiddenSeats: g.hiddenSeats,
+        salt: g.salt,
+        hostSeed: hostSeedRef.current,
+        recomputedCommitment: poseidonCommitment(g.hiddenSeats, g.salt),
+        recomputedSeedCommitment: seedCommitment(hostSeedRef.current),
+      }),
+    );
+  },
+
+  payout: () => {
+    if (get().mode === "online") {
+      void get().send({ type: "payout" });
+      return;
+    }
+    apply(set, (g) => engine.payout(g));
+  },
+
+  /**
+   * Bots act through the same engine transitions as people — but must never
+   * touch `viewerSeat`/`revealed`, or a bot voting in the background would
+   * yank a human out of their own reveal screen mid-turn.
+   */
+  botAct: (action) => {
+    if (action.kind === "move") {
+      get().moveTo(action.seat, action.to);
+      return;
+    }
+    if (action.kind === "task") {
+      get().completeTask(action.seat, action.taskId);
+      return;
+    }
+    apply(set, (g) => {
+      switch (action.kind) {
+        case "seeRole":
+          return engine.markRoleSeen(g, action.seat);
+        case "kill":
+          return engine.privateKill(g, action.victim);
+        case "report":
+          return engine.reportNightKill(g, engine.seatOf(g, action.seat).sessionKey);
+        case "vote":
+          return engine.handleVote(g, {
+            voterSeat: action.voter,
+            candidateSeat: action.candidate,
+          });
+        default:
+          // "move" / "task" are routed to the deck above and never reach here.
+          return g;
+      }
+    });
+  },
+
+  setViewer: (seat) => set({ viewerSeat: seat, revealed: false }),
+  reveal: () => set({ revealed: true }),
+  cover: () =>
+    set((st) =>
+      st.mode === "online" ? {} : { revealed: false, viewerSeat: null },
+    ),
+  seeRole: (seat) => {
+    if (get().mode === "online") {
+      void get().send({ type: "seeRole" });
+      return;
+    }
+    apply(set, (g) => engine.markRoleSeen(g, seat));
+  },
+  clearError: () => set({ error: null }),
+
+  // ── online ───────────────────────────────────────────────────────────
+
+  /** Open a relayed room and take the first seat. */
+  hostRoom: async (name, opts) => {
+    set({ connecting: true, error: null });
+    try {
+      const code = await online.createRoom(opts);
+      set({ mode: "online", roomCode: code });
+      await get().joinRoom(code, name);
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
+    } finally {
+      set({ connecting: false });
+    }
+  },
+
+  /** Join an existing room by code. */
+  joinRoom: async (code, name) => {
+    set({ connecting: true, error: null, mode: "online", roomCode: code.toUpperCase() });
+    try {
+      const view = await online.sendAction(code.toUpperCase(), { type: "join", name });
+      get().applyView(view);
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
+    } finally {
+      set({ connecting: false });
+    }
+  },
+
+  leaveRoom: () =>
+    set({
+      mode: "local",
+      roomCode: null,
+      mySeat: null,
+      game: null,
+      ship: null,
+      viewerSeat: null,
+      revealed: false,
+      error: null,
+    }),
+
+  /**
+   * Fold a server view into the store.
+   *
+   * `viewerSeat`/`revealed` are pinned to our own seat: online there is no
+   * device to pass, so the cover screen would only be in the way.
+   */
+  applyView: (view) =>
+    set({
+      game: view.game,
+      ship: view.ship,
+      mySeat: view.seat,
+      roomCode: view.code,
+      viewerSeat: view.seat,
+      revealed: true,
+    }),
+
+  /** Post one action and fold in the resulting view. */
+  send: async (action) => {
+    const code = get().roomCode;
+    if (!code) return;
+    try {
+      get().applyView(await online.sendAction(code, action));
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+}));
+
+/** Convenience selectors. */
+export const selectPhase = (s: Store) => s.game?.phase ?? Phase.LOBBY;

@@ -1,0 +1,381 @@
+/* Deck view + task minigames. Inherits the palette from play.module.css's
+   .shell, so these only define layout and the game-specific bits. */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── deck ───────────────────────────────────────────────────────────── */
+
+.deck {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(2, minmax(96px, 1fr));
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, #0d0e18, #0a0b13);
+  border: 1px solid #24263a;
+}
+
+.corridors {
+  position: absolute;
+  inset: 10px;
+  width: calc(100% - 20px);
+  height: calc(100% - 20px);
+  pointer-events: none;
+}
+.corridors line {
+  stroke: #262a44;
+  stroke-width: 10;
+  stroke-linecap: round;
+}
+
+.room {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 96px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid #24263a;
+  background: #12131f;
+  color: #e8e9f3;
+  font: inherit;
+  cursor: default;
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+}
+
+/* Rooms you can walk to: lit and clickable. */
+.roomOpen {
+  cursor: pointer;
+  border-color: #2f3350;
+  background: #16182a;
+}
+.roomOpen:hover {
+  border-color: #35d9c4;
+  transform: translateY(-1px);
+}
+
+/* The room you're standing in. */
+.roomHere {
+  border-color: #35d9c4;
+  background: #10241f;
+  box-shadow: inset 0 0 0 1px #1f6f63;
+}
+
+/* Out of reach this step — dimmed, not hidden, so the map stays legible. */
+.roomFar {
+  opacity: 0.45;
+}
+
+.roomName {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #b9bbd4;
+  text-align: center;
+}
+.roomHere .roomName { color: #e8e9f3; }
+
+/* Marks a room holding one of *your* outstanding tasks. */
+.taskPip {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f5c451;
+  box-shadow: 0 0 0 3px #f5c45133;
+}
+
+.dots {
+  display: flex;
+  gap: 5px;
+  min-height: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* Marks which crewmate is you, without obscuring the sprite. */
+.dotMe {
+  display: inline-block;
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px #ffffffcc;
+}
+
+.goHint {
+  position: absolute;
+  bottom: 6px;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6b6f92;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.roomOpen:hover .goHint { opacity: 1; }
+
+/* ── status strip ───────────────────────────────────────────────────── */
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 13px;
+  border-radius: 10px;
+  background: #171826;
+  border: 1px solid #24263a;
+  font-size: 12.5px;
+}
+.statusRoom { font-weight: 700; }
+.statusWho { color: #8b8da8; }
+
+.progressWrap {
+  display: block;
+  margin-left: auto;
+  width: 92px;
+  height: 7px;
+  border-radius: 999px;
+  background: #0c0d16;
+  border: 1px solid #24263a;
+  overflow: hidden;
+}
+.progressBar {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #1f6f63, #35d9c4);
+  transition: width 0.35s ease;
+}
+.progressNum {
+  font-family: var(--font-mono-ui), monospace;
+  font-size: 11.5px;
+  color: #8b8da8;
+}
+
+/* ── actions ────────────────────────────────────────────────────────── */
+
+.actions {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.primary,
+.kill {
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 10px;
+  border: none;
+  font: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: filter 0.15s, transform 0.08s;
+}
+.primary { background: #35d9c4; color: #06231e; }
+.kill { background: #ff4d5e; color: #2a0009; }
+.primary:hover, .kill:hover { filter: brightness(1.08); }
+.primary:active, .kill:active { transform: scale(0.985); }
+
+.noTask {
+  font-size: 12.5px;
+  color: #8b8da8;
+}
+
+/* ── task list ──────────────────────────────────────────────────────── */
+
+.taskList {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+}
+.taskItem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12.5px;
+  color: #b9bbd4;
+}
+.taskTick { color: #f5c451; width: 12px; }
+.taskDone { color: #5f6280; text-decoration: line-through; }
+.taskDone .taskTick { color: #35d9c4; text-decoration: none; }
+.taskRoom {
+  margin-left: auto;
+  font-family: var(--font-mono-ui), monospace;
+  font-size: 11px;
+  color: #6b6f92;
+}
+
+/* ── minigame modal ─────────────────────────────────────────────────── */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(4, 5, 10, 0.85);
+  backdrop-filter: blur(3px);
+}
+
+.modalCard {
+  width: 100%;
+  max-width: 380px;
+  background: #10111b;
+  border: 1px solid #2f3350;
+  border-radius: 16px;
+  padding: 22px;
+  text-align: center;
+  box-shadow: 0 30px 70px -30px #000;
+}
+.modalTitle { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+.modalBlurb { font-size: 12.5px; color: #8b8da8; margin-bottom: 16px; }
+.modalClose {
+  margin-top: 16px;
+  background: none;
+  border: none;
+  color: #6b6f92;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.modalClose:hover { color: #e8e9f3; }
+
+/* ── shared minigame chrome ─────────────────────────────────────────── */
+
+.game { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.gameHint { font-size: 12.5px; color: #b9bbd4; min-height: 17px; }
+.gameCount {
+  font-family: var(--font-mono-ui), monospace;
+  font-size: 11.5px;
+  color: #6b6f92;
+}
+
+/* 1. rewire */
+.wireSvg { width: 100%; max-width: 300px; height: auto; }
+
+/* 2. keypad */
+.codeTarget {
+  font-family: var(--font-mono-ui), monospace;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  text-indent: 0.32em;
+  color: #f5c451;
+}
+.codeDisplay { display: flex; gap: 8px; }
+.codeCell {
+  width: 38px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #0c0d16;
+  border: 1px solid #2f3350;
+  font-family: var(--font-mono-ui), monospace;
+  font-size: 21px;
+}
+.codeWrong .codeCell {
+  border-color: #ff4d5e;
+  animation: shake 0.34s;
+}
+@keyframes shake {
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+.keypad {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 7px;
+  width: 100%;
+}
+.key {
+  height: 42px;
+  border-radius: 9px;
+  border: 1px solid #2f3350;
+  background: #171826;
+  color: #e8e9f3;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s, transform 0.08s;
+}
+.key:hover { background: #232538; }
+.key:active { transform: scale(0.94); }
+
+/* 3. stabilize */
+.gauge {
+  position: relative;
+  width: 100%;
+  max-width: 300px;
+  height: 44px;
+  border-radius: 10px;
+  background: #0c0d16;
+  border: 1px solid #2f3350;
+  overflow: hidden;
+  transition: border-color 0.18s;
+}
+.gaugeHit { border-color: #35d9c4; }
+.gaugeMiss { border-color: #ff4d5e; }
+
+.gaugeBand {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(180deg, #35d9c433, #35d9c41f);
+  border-left: 1px solid #35d9c4;
+  border-right: 1px solid #35d9c4;
+  transition: left 0.25s, width 0.25s;
+}
+
+.needle {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  width: 3px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 0 8px #ffffffaa;
+}
+
+.lockBtn {
+  height: 40px;
+  padding: 0 26px;
+  border-radius: 10px;
+  border: none;
+  background: #f5c451;
+  color: #2a2410;
+  font: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+}
+.lockBtn:active { transform: scale(0.97); }
+
+@media (max-width: 520px) {
+  .deck { grid-template-rows: repeat(2, minmax(84px, 1fr)); }
+  .room { min-height: 84px; }
+}

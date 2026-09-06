@@ -1,0 +1,167 @@
+//! Unit tests for the parts of the round that can go quietly wrong.
+//!
+//! Run with `scarb cairo-test`. These deliberately target the derivation and
+//! the resolution arithmetic rather than the happy-path plumbing: a lobby that
+//! fails to accept a player is obvious the first time anyone plays, whereas a
+//! biased or duplicate-producing seed draw, or an off-by-one in the ejection
+//! rule, is exactly the kind of thing that survives a demo and is wrong.
+
+#[cfg(test)]
+mod tests {
+    use core::poseidon::poseidon_hash_span;
+    use signal::round::derive_hidden;
+
+    fn seed(x: felt252) -> felt252 {
+        poseidon_hash_span(array![x].span())
+    }
+
+    // ── derive_hidden ──────────────────────────────────────────────────────
+
+    #[test]
+    fn derives_the_requested_number_of_seats() {
+        let hidden = derive_hidden(seed(1), 7, 3);
+        assert(hidden.len() == 3, 'wrong count');
+    }
+
+    #[test]
+    fn derived_seats_are_in_range() {
+        let n: u32 = 9;
+        let hidden = derive_hidden(seed(42), n, 3);
+        let mut i: u32 = 0;
+        while i != hidden.len() {
+            assert(*hidden.at(i) < n, 'seat out of range');
+            i += 1;
+        }
+    }
+
+    /// The swap-remove in the Fisher-Yates draw is the part most likely to be
+    /// wrong; a duplicate would silently shrink the hidden team.
+    #[test]
+    fn derived_seats_are_distinct() {
+        let hidden = derive_hidden(seed(7), 5, 2);
+        assert(*hidden.at(0) != *hidden.at(1), 'duplicate seat');
+    }
+
+    #[test]
+    fn derived_seats_are_distinct_at_full_table() {
+        let hidden = derive_hidden(seed(99), 15, 3);
+        let a = *hidden.at(0);
+        let b = *hidden.at(1);
+        let c = *hidden.at(2);
+        assert(a != b, 'dup a b');
+        assert(b != c, 'dup b c');
+        assert(a != c, 'dup a c');
+    }
+
+    /// The commitment hashes the sequence, so a non-canonical order would let
+    /// the same team hash many ways.
+    #[test]
+    fn derived_seats_are_ascending() {
+        let hidden = derive_hidden(seed(1234), 11, 3);
+        assert(*hidden.at(0) < *hidden.at(1), 'not ascending 0 1');
+        assert(*hidden.at(1) < *hidden.at(2), 'not ascending 1 2');
+    }
+
+    /// Resolution recomputes the draw from the revealed seed, so the same
+    /// inputs must always give the same team or no round could ever open.
+    #[test]
+    fn derivation_is_deterministic() {
+        let a = derive_hidden(seed(5), 8, 2);
+        let b = derive_hidden(seed(5), 8, 2);
+        assert(*a.at(0) == *b.at(0), 'seat 0 differs');
+        assert(*a.at(1) == *b.at(1), 'seat 1 differs');
+    }
+
+    #[test]
+    fn different_seeds_move_the_team() {
+        // Not a distribution test - just that the seed is actually mixed in.
+        let a = derive_hidden(seed(1), 15, 1);
+        let b = derive_hidden(seed(2), 15, 1);
+        let c = derive_hidden(seed(3), 15, 1);
+        let all_same = *a.at(0) == *b.at(0) && *b.at(0) == *c.at(0);
+        assert(!all_same, 'seed not mixed in');
+    }
+
+    #[test]
+    fn whole_table_hidden_is_every_seat() {
+        let hidden = derive_hidden(seed(8), 4, 4);
+        assert(hidden.len() == 4, 'wrong count');
+        assert(*hidden.at(0) == 0, 'expected 0');
+        assert(*hidden.at(1) == 1, 'expected 1');
+        assert(*hidden.at(2) == 2, 'expected 2');
+        assert(*hidden.at(3) == 3, 'expected 3');
+    }
+
+    #[test]
+    #[should_panic(expected: ('k above n',))]
+    fn cannot_draw_more_than_the_table() {
+        derive_hidden(seed(1), 3, 4);
+    }
+
+    // ── cross-language parity ─────────────────────────────────────────────
+
+    /// These exact seat lists were produced by the TypeScript mirror in
+    /// `app/src/game/crypto.ts`. If either side's poseidon padding, felt->u256
+    /// conversion or swap-remove ever drifts, this test fails — which is the
+    /// only way to catch it, since a divergence would simply make every round
+    /// unopenable at `resolve_round` with a "commitment mismatch".
+    #[test]
+    fn matches_the_typescript_mirror() {
+        let a = derive_hidden(seed(5), 8, 2);
+        assert(*a.at(0) == 2, 'ts parity a0');
+        assert(*a.at(1) == 5, 'ts parity a1');
+
+        let b = derive_hidden(seed(1234), 11, 3);
+        assert(*b.at(0) == 1, 'ts parity b0');
+        assert(*b.at(1) == 6, 'ts parity b1');
+        assert(*b.at(2) == 8, 'ts parity b2');
+
+        let c = derive_hidden(seed(42), 9, 3);
+        assert(*c.at(0) == 2, 'ts parity c0');
+        assert(*c.at(1) == 3, 'ts parity c1');
+        assert(*c.at(2) == 8, 'ts parity c2');
+
+        let d = derive_hidden(seed(7), 5, 2);
+        assert(*d.at(0) == 1, 'ts parity d0');
+        assert(*d.at(1) == 2, 'ts parity d1');
+    }
+
+    // ── the commitment the contract checks ────────────────────────────────
+
+    /// `resolve_round` recomputes this exact hash; if the ordering convention
+    /// drifted from the client the round would be unopenable.
+    #[test]
+    fn role_commitment_is_order_sensitive() {
+        let a = poseidon_hash_span(array![1, 4, 999].span());
+        let b = poseidon_hash_span(array![4, 1, 999].span());
+        assert(a != b, 'order must matter');
+    }
+
+    #[test]
+    fn seed_commitment_round_trips() {
+        let host_seed: felt252 = 0x1234abcd;
+        let commitment = poseidon_hash_span(array![host_seed].span());
+        assert(commitment == seed(0x1234abcd), 'commitment mismatch');
+    }
+
+    /// The host commits before any player entropy exists, so mixing must
+    /// change the result - otherwise the players contribute nothing.
+    #[test]
+    fn player_entropy_changes_the_combined_seed() {
+        let host_seed: felt252 = 777;
+        let without = poseidon_hash_span(array![host_seed].span());
+        let with_players = poseidon_hash_span(array![host_seed, 11, 22, 33].span());
+        assert(without != with_players, 'entropy ignored');
+    }
+
+    #[test]
+    fn one_player_changing_entropy_changes_the_team() {
+        let a = poseidon_hash_span(array![777, 11, 22, 33, 44, 55].span());
+        let b = poseidon_hash_span(array![777, 11, 22, 33, 44, 56].span());
+        assert(a != b, 'last player cannot matter');
+        let team_a = derive_hidden(a, 6, 1);
+        let team_b = derive_hidden(b, 6, 1);
+        // Not guaranteed different for one draw, but the seeds must differ.
+        assert(team_a.len() == team_b.len(), 'len differs');
+    }
+}

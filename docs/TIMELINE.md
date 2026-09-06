@@ -32,9 +32,36 @@ with 3 real mainnet txs beats an ambitious one that never deploys.
 - [ ] Deploy `SignalRound` + `SignalEscrow` to **mainnet** (declare +
       deploy; record class hashes and addresses in `strk20.json.contracts`)
 - [ ] `app/.env.local` with RPC key (`cp .env.example .env.local`)
-- [ ] Wire lobby screen: join (session-key generation client-side,
-      payout-note creation via SDK phase 5), seat list, phase banner
-- [ ] Wire role-note send (host tool) + role decrypt view
+- [x] Build the game UI: lobby, role reveal, night, vote, resolve/payout,
+      one panel per phase, on a local engine that mirrors `round.cairo`
+      (`app/src/game/engine.ts`). Session keys and the poseidon commitment
+      are real starknet.js values, not stand-ins.
+- [x] Bot seats so one person can run a whole round solo — needed for the
+      demo video, since there is no networked lobby (`app/src/game/bots.ts`)
+- [x] RFP gap audit (table in CLAUDE.md) - 3 of 13 fully met before this pass
+- [x] Player bounds raised to the RFP's 5-15; added a ~15-minute "Table" pace
+- [x] Variants as contract configuration: `round.cairo` now takes
+      `min/max/hidden_count` and resolves over a hidden *team*, with
+      Among Us / One Night Werewolf / Secret Hitler / Avalon / Clocktower
+      presets. Verified a 2-werewolf round end to end.
+- [!] Encrypted role notes, private night transfers, anonymous vote legs and
+      paymaster remain BLOCKED on `@starkware-libs/starknet-privacy-sdk`
+      (GitHub Packages auth) + proving service + indexer URLs
+- [x] Cross-device play via an in-memory relay (room codes) — requested, but
+      note it earns nothing against the judging criteria and the mainnet
+      deploy below is still the highest-value remaining item
+- [x] Crewmate sprites on every screen + an ejection scene on resolve, so the
+      non-deck phases stop looking like forms (`ship/Crewmate.tsx`,
+      `ship/Ejection.tsx`)
+- [x] 2D deck for the night phase: rooms + corridors, fog of war, movement,
+      three task minigames, sightings surfaced at the vote
+      (`app/src/game/ship.ts`, `app/src/app/play/ship/`). NOTE: this was a
+      listed Phase-2 cut, pulled forward on request. Nothing is deployed yet —
+      mainnet deploy is still the highest-value remaining item (30% of scoring).
+- [ ] Swap the engine for chain calls in `app/src/game/store.ts`: `join`
+      (payout-note creation via SDK phase 5), `assign_roles`, `start_night`
+- [ ] Wire role-note send (host tool) + role decrypt view to real
+      encrypted notes (currently roles are held in local state)
 
 ## Day 2 (Sept 7) — run a round, ship the proof
 

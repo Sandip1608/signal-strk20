@@ -1,6 +1,7 @@
 "use client";
 
 import type { CSSProperties } from 'react';
+import Link from 'next/link';
 import styles from './uni.module.css';
 import SelectWallet from './components/client/WalletHandle/SelectWallet';
 import WalletAccountV6Tag from './components/client/WalletHandle/WalletAccountV6Tag';
@@ -65,6 +66,13 @@ export default function Page() {
           Shield, unshield, privately transfer and build your own private apps
           on Starknet.
         </p>
+        <Link href="/play" className={styles.playCta}>
+          <span className={styles.playCtaDot} aria-hidden />
+          Play Signal — on-chain Among Us
+        </Link>
+        <span className={styles.playCtaSub}>
+          Hidden roles, anonymous votes and a shielded payout, built on these primitives.
+        </span>
       </header>
 
       <main>

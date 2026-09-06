@@ -1,0 +1,120 @@
+.space {
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 24px;
+  background:
+    radial-gradient(120% 90% at 50% 0%, #1b1636 0%, #0a0912 55%, #05050b 100%);
+  border: 1px solid #2a2340;
+}
+
+/* Two parallax star layers, each one repeating gradient — no DOM per star. */
+.stars,
+.stars2 {
+  position: absolute;
+  inset: -40%;
+  background-repeat: repeat;
+  pointer-events: none;
+}
+.stars {
+  background-image:
+    radial-gradient(1.4px 1.4px at 20% 30%, #ffffffcc 50%, transparent 51%),
+    radial-gradient(1.2px 1.2px at 70% 60%, #ffffff99 50%, transparent 51%),
+    radial-gradient(1.6px 1.6px at 45% 80%, #ffffffbb 50%, transparent 51%);
+  background-size: 180px 180px, 240px 240px, 300px 300px;
+  animation: drift 90s linear infinite;
+  opacity: 0.8;
+}
+.stars2 {
+  background-image:
+    radial-gradient(1px 1px at 15% 65%, #b78bff88 50%, transparent 51%),
+    radial-gradient(1.2px 1.2px at 85% 25%, #35d9c488 50%, transparent 51%);
+  background-size: 220px 220px, 340px 340px;
+  animation: drift 140s linear infinite reverse;
+  opacity: 0.65;
+}
+@keyframes drift {
+  to { transform: translate3d(-180px, 90px, 0); }
+}
+
+/* The ejected crewmate tumbling out of frame. */
+.drifter {
+  position: absolute;
+  top: 16%;
+  left: -90px;
+  animation: eject 5.5s cubic-bezier(0.25, 0.6, 0.45, 1) forwards;
+}
+@keyframes eject {
+  0%   { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 0; }
+  8%   { opacity: 1; }
+  100% { transform: translate(120vw, 46px) rotate(760deg) scale(0.55); opacity: 1; }
+}
+
+.centre {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.captions {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: center;
+}
+
+.line {
+  font-size: 18px;
+  font-weight: 600;
+  color: #d8daf0;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+.sub {
+  font-size: 13.5px;
+  color: #8b8da8;
+}
+.show {
+  opacity: 1;
+  transform: none;
+}
+
+.verdict {
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  opacity: 0;
+  transform: translateY(8px) scale(0.97);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+.verdict.show {
+  opacity: 1;
+  transform: none;
+}
+
+.good { color: #35d9c4; }
+.bad { color: #ff4d5e; }
+
+.reveal {
+  font-size: 17px;
+  font-weight: 600;
+  color: #d8daf0;
+}
+
+/* Anyone who prefers less motion gets the outcome without the tumbling. */
+@media (prefers-reduced-motion: reduce) {
+  .stars, .stars2 { animation: none; }
+  .drifter { animation: none; left: 24px; top: 20%; opacity: 1; }
+  .line, .verdict { transition: none; }
+}
