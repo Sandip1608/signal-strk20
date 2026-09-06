@@ -140,6 +140,8 @@ export type Action =
   | { type: "callMeeting"; seat: number }
   | { type: "vent"; seat: number }
   | { type: "sabotageLights" }
+  | { type: "sabotageReactor" }
+  | { type: "fixReactor" }
   | { type: "fixLights" }
   | { type: "vote"; seat: number; candidate: number }
   | { type: "resolve" }
@@ -223,7 +225,13 @@ export function applyAction(room: Room, action: Action): void {
       break;
 
     case "task":
-      if (room.ship) room.ship = ship.completeTask(room.ship, action.seat, action.taskId);
+      if (room.ship) {
+        const me = g0.seats.find((x) => x.seat === action.seat);
+        room.ship = ship.completeTask(room.ship, action.seat, action.taskId, {
+          isImpostor: me?.role === "IMPOSTOR",
+          living: g0.seats.filter((x) => !x.dead).map((x) => x.seat),
+        });
+      }
       break;
 
     case "kill":
@@ -241,6 +249,14 @@ export function applyAction(room: Room, action: Action): void {
 
     case "sabotageLights":
       if (room.ship) room.ship = ship.sabotageLights(room.ship);
+      break;
+
+    case "sabotageReactor":
+      if (room.ship) room.ship = ship.sabotageReactor(room.ship);
+      break;
+
+    case "fixReactor":
+      if (room.ship) room.ship = ship.fixReactor(room.ship);
       break;
 
     case "fixLights":
@@ -385,6 +401,9 @@ export function viewFor(room: Room, seat: number | null): ViewerState {
     shipView = {
       killReadyAt: room.ship.killReadyAt,
       lightsOutUntil: room.ship.lightsOutUntil,
+      // Everyone must see the meltdown - it is the one thing the whole crew
+      // has to react to at once.
+      reactorDeadline: room.ship.reactorDeadline,
       positions,
       // Task lists are sent in full, deliberately. They carry no role
       // information — the impostor gets a list too — and the shared crew

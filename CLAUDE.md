@@ -261,6 +261,31 @@ task list, and three hand-rolled minigames — wire matching, a keypad, and
 a timing gauge. No canvas, no game library; the only per-frame animation is
 the gauge needle inside its own modal.
 
+**Impostor task lists are fake.** `completeTask` takes `isImpostor` and
+returns the ship untouched for them: the panel opens and plays (looking busy is
+the disguise) but nothing completes, the shared bar does not move, and the
+security log stays shut. Before this it never checked the role at all, so doing
+tasks was strictly *good* for the impostor — it filled the crew bar and handed
+them the log reward. `taskProgress` also takes `crewOnly`, since counting fake
+lists would let an impostor inflate the crew's apparent progress.
+
+**Visual tasks are the only hard evidence in the game.** A `visual` task
+records a `visual: true` sighting for everyone standing there when it
+completes. Because an impostor can never complete anything, watching someone
+finish one *clears* them — that asymmetry only works while the rule above
+holds, so don't relax it.
+
+**The reactor is a losing outcome, so it is verifiable rather than declared.**
+`sabotage_reactor` sets `reactor_deadline` on-chain and `fix_reactor` clears
+it; `resolve_sabotage` then only needs to see the deadline pass with no fix —
+the contract is its own witness, unlike the multi-round ending where the host
+declares and is checked afterwards. `fix_reactor` accepts up to *and
+including* the deadline, `resolve_sabotage` only strictly after; five tests pin
+that the two windows never overlap. A new night clears any unfixed meltdown.
+
+Both resolvers share `open_roles()` — two copies of a reveal is how the paths
+quietly drift apart.
+
 **The ballot closes as soon as everyone has voted** — the deadline is now a
 ceiling, not a wait. `ballot_closed()` returns true on either the timer *or*
 every living player having voted, and both `end_vote` and `resolve_round`

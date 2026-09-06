@@ -71,6 +71,8 @@ type Store = {
   callMeeting: (seat: number) => void;
   useVent: (seat: number) => void;
   sabotageLights: () => void;
+  sabotageReactor: () => void;
+  fixReactor: () => void;
   fixLights: () => void;
   vote: (voterSeat: number, candidateSeat: number) => void;
   /** Apply one bot action. Deliberately leaves viewer/reveal state alone. */
@@ -244,7 +246,16 @@ export const useGame = create<Store>((set, get) => ({
       void get().send({ type: "task", taskId });
       return;
     }
-    set((st) => (st.ship ? { ship: ship.completeTask(st.ship, seat, taskId) } : {}));
+    set((st) => {
+      if (!st.ship || !st.game) return {};
+      const me = st.game.seats.find((x) => x.seat === seat);
+      return {
+        ship: ship.completeTask(st.ship, seat, taskId, {
+          isImpostor: me?.role === "IMPOSTOR",
+          living: st.game.seats.filter((x) => !x.dead).map((x) => x.seat),
+        }),
+      };
+    });
   },
 
   kill: (victimSeat) => {
@@ -312,6 +323,22 @@ export const useGame = create<Store>((set, get) => ({
       return;
     }
     set((st) => (st.ship ? { ship: ship.sabotageLights(st.ship) } : {}));
+  },
+
+  sabotageReactor: () => {
+    if (get().mode === "online") {
+      void get().send({ type: "sabotageReactor" });
+      return;
+    }
+    set((st) => (st.ship ? { ship: ship.sabotageReactor(st.ship) } : {}));
+  },
+
+  fixReactor: () => {
+    if (get().mode === "online") {
+      void get().send({ type: "fixReactor" });
+      return;
+    }
+    set((st) => (st.ship ? { ship: ship.fixReactor(st.ship) } : {}));
   },
 
   fixLights: () => {

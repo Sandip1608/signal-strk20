@@ -141,6 +141,51 @@ mod tests {
         assert(!ejects(0, false, 0), 'no votes should eject nobody');
     }
 
+    // ── reactor meltdown ──────────────────────────────────────────────────
+
+    /// The meltdown is the one losing outcome the contract decides *without*
+    /// a vote, so its window has to be unambiguous: `fix_reactor` accepts up
+    /// to and including the deadline, `resolve_sabotage` only strictly after.
+    /// An overlap would let the same instant be both fixable and lost.
+    fn can_fix(now: u64, deadline: u64) -> bool {
+        deadline != 0 && now <= deadline
+    }
+    fn is_blown(now: u64, deadline: u64) -> bool {
+        deadline != 0 && now > deadline
+    }
+
+    #[test]
+    fn a_stable_reactor_is_neither_fixable_nor_blown() {
+        assert(!can_fix(100, 0), 'nothing to fix');
+        assert(!is_blown(100, 0), 'nothing blew');
+    }
+
+    #[test]
+    fn the_reactor_can_be_fixed_right_up_to_the_deadline() {
+        assert(can_fix(99, 100), 'before should fix');
+        assert(can_fix(100, 100), 'on the tick should fix');
+    }
+
+    #[test]
+    fn one_tick_late_is_a_meltdown() {
+        assert(!can_fix(101, 100), 'too late to fix');
+        assert(is_blown(101, 100), 'should have blown');
+    }
+
+    /// The two windows must never both be true.
+    #[test]
+    fn fixable_and_blown_are_mutually_exclusive() {
+        assert(!(can_fix(100, 100) && is_blown(100, 100)), 'overlap at deadline');
+        assert(!(can_fix(101, 100) && is_blown(101, 100)), 'overlap after');
+        assert(!(can_fix(1, 100) && is_blown(1, 100)), 'overlap before');
+    }
+
+    #[test]
+    fn reactor_window_is_sane() {
+        assert(signal::round::REACTOR_SECS > 0, 'needs a window');
+        assert(signal::round::REACTOR_SECS <= 120, 'window too long to matter');
+    }
+
     // ── closing the ballot early ──────────────────────────────────────────
 
     /// Mirrors the vote-count half of `ballot_closed()`.

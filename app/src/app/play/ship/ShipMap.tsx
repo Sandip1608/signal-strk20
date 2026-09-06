@@ -24,6 +24,8 @@ import {
   killReady,
   lightsOut,
   lightsOutLeft,
+  reactorGoing,
+  reactorSecsLeft,
   neighbours,
   occupants,
   taskHere,
@@ -78,6 +80,9 @@ export function ShipMap({
   onFixLights,
   onCallMeeting,
   canCallMeeting,
+  onSabotageReactor,
+  onFixReactor,
+  isImpostor,
 }: {
   ship: ShipState;
   me: Seat;
@@ -91,6 +96,10 @@ export function ShipMap({
   onFixLights: () => void;
   onCallMeeting: () => void;
   canCallMeeting: boolean;
+  onSabotageReactor: () => void;
+  onFixReactor: () => void;
+  /** Their task list is fake — they can play a panel but never finish it. */
+  isImpostor: boolean;
 }) {
   const [openTask, setOpenTask] = useState<string | null>(null);
   // Re-render once a second so the cooldown and lights timers tick.
@@ -104,6 +113,9 @@ export function ShipMap({
   const canKillNow = canKill && killReady(ship);
   const cooldown = killCooldownLeft(ship);
   const ventTo = canKill ? ventFrom(ship.positions[me.seat]) : null;
+  const meltdown = reactorGoing(ship);
+  const meltdownLeft = reactorSecsLeft(ship);
+  const inReactor = ship.positions[me.seat] === "reactor";
 
   const livingSeats = living.map((x) => x.seat);
   const here = ship.positions[me.seat];
@@ -111,7 +123,13 @@ export function ShipMap({
   const roomMates = occupants(ship, here, livingSeats).filter((x) => x !== me.seat);
   const task = taskHere(ship, me.seat);
   const myTasks = ship.tasks[me.seat] ?? [];
-  const progress = taskProgress(ship, livingSeats);
+  // The bar counts crew lists only; an impostor's fake tasks are not part of
+          // the crew's job.
+          const progress = taskProgress(
+            ship,
+            livingSeats,
+            isImpostor ? livingSeats.filter((x) => x !== me.seat) : undefined,
+          );
 
   const active = myTasks.find((t) => t.id === openTask) ?? null;
 
@@ -166,6 +184,23 @@ export function ShipMap({
         })}
       </div>
 
+      {meltdown && (
+        <div className={s.alarm} role="alert">
+          <span className={s.alarmTitle}>REACTOR MELTDOWN</span>
+          <span className={s.alarmClock}>{meltdownLeft}s</span>
+          <span className={s.alarmText}>
+            {inReactor
+              ? "You are here — stop it."
+              : "Get to the Reactor. If it blows, the impostors win."}
+          </span>
+          {inReactor && (
+            <button type="button" className={s.primary} onClick={onFixReactor}>
+              Stop the meltdown
+            </button>
+          )}
+        </div>
+      )}
+
       {/* ── status strip ─────────────────────────────────────────────── */}
       <div className={s.status}>
         <span className={s.statusRoom}>{ROOM_BY_ID[here].name}</span>
@@ -192,6 +227,7 @@ export function ShipMap({
         {task ? (
           <button type="button" className={s.primary} onClick={() => setOpenTask(task.id)}>
             {task.label}
+            {isImpostor ? " (fake)" : ""}
           </button>
         ) : (
           <span className={s.noTask}>
@@ -228,6 +264,12 @@ export function ShipMap({
           </button>
         )}
 
+        {canKill && !meltdown && (
+          <button type="button" className={s.sabotage} onClick={onSabotageReactor}>
+            Sabotage reactor
+          </button>
+        )}
+
         {dark && ship.positions[me.seat] === "electrical" && (
           <button type="button" className={s.primary} onClick={onFixLights}>
             Restore lights
@@ -243,10 +285,16 @@ export function ShipMap({
 
       {/* ── task list ────────────────────────────────────────────────── */}
       <ul className={s.taskList}>
+        {isImpostor && (
+          <li className={s.taskFake}>
+            Your list is fake — you can open a panel to look busy, but nothing will ever complete.
+          </li>
+        )}
         {myTasks.map((t) => (
           <li key={t.id} className={`${s.taskItem} ${t.done ? s.taskDone : ""}`}>
             <span className={s.taskTick}>{t.done ? "✓" : "○"}</span>
             {t.label}
+            {t.visual && <span className={s.taskVisual}>witnessed</span>}
             <span className={s.taskRoom}>{ROOM_BY_ID[t.room].name}</span>
           </li>
         ))}

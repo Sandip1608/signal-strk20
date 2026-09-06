@@ -220,6 +220,7 @@ export function NightPanel({ game }: { game: GameState }) {
   const {
     viewerSeat, revealed, setViewer, reveal, cover, kill, report, skipNight,
     ship, moveTo, completeTask, mode, callMeeting, useVent, sabotageLights, fixLights,
+    sabotageReactor, fixReactor,
   } = useGame();
   const online = mode === "online";
   const nightOver = useDeadline(game.nightDeadline);
@@ -316,6 +317,9 @@ export function NightPanel({ game }: { game: GameState }) {
             onFixLights={fixLights}
             onCallMeeting={() => callMeeting(viewer.seat)}
             canCallMeeting={!viewer.calledMeeting && !viewer.dead}
+            onSabotageReactor={sabotageReactor}
+            onFixReactor={fixReactor}
+            isImpostor={isImpostor}
           />
         ) : (
           <p className={s.panelHint}>The deck is not ready.</p>
@@ -559,7 +563,8 @@ function Witnessed({
     return out;
   };
 
-  const witnessed = collapse(all.filter((x) => !x.viaLog));
+  const witnessed = collapse(all.filter((x) => !x.viaLog && !x.visual));
+  const proven = collapse(all.filter((x) => x.visual));
   const fromLog = collapse(all.filter((x) => x.viaLog));
   const finished = tasksComplete(ship, seat);
   const phrase = (u: { who: number; room: string }) => `${nameOf(u.who)} in ${u.room}`;
@@ -572,6 +577,15 @@ function Witnessed({
           ? "Nobody — you were alone all night. That also means nobody can vouch for you."
           : `${witnessed.slice(0, 6).map(phrase).join(" · ")}.`}
       </p>
+
+      {/* A visual task is the only hard evidence in the game: an impostor can
+          never complete anything, so watching someone finish one clears them. */}
+      {proven.length > 0 && (
+        <p className={s.note} style={{ marginTop: 8, borderColor: "#1f6f63" }}>
+          <strong>You watched them finish a task.</strong>{" "}
+          {proven.map(phrase).join(" · ")}. Only crew can complete a task, so that clears them.
+        </p>
+      )}
 
       {/* Finishing your task list buys evidence. It does not change who wins —
           that is still whatever resolve_round computes from the vote. */}

@@ -118,6 +118,9 @@ pub const SKIP_VOTE: u32 = 0xffffffff;
 /// stops a host simply never calling it, so the loop needs a ceiling.
 pub const MAX_ROUNDS: u32 = 10;
 
+/// Seconds the crew have to reach the reactor before it melts down.
+pub const REACTOR_SECS: u64 = 30;
+
 #[starknet::contract]
 pub mod SignalRound {
     use core::num::traits::Zero;
@@ -171,6 +174,12 @@ pub mod SignalRound {
         // Map has no "clear", so the alternative would be walking every seat on
         // each boundary.
         round_number: u32,
+        // -- reactor --
+        // 0 = stable. Set by `sabotage_reactor`, cleared by `fix_reactor`.
+        // Both are on-chain so the meltdown outcome is *verifiable*: the
+        // contract can see for itself that the deadline passed with no fix,
+        // rather than taking a host's word for it.
+        reactor_deadline: u64,
         night_victim_of: Map<u32, u32>, // round -> seat + 1, 0 = nobody died
         ejection_of: Map<u32, u32>, // round -> seat + 1, 0 = nobody ejected
         // -- vote --
@@ -198,6 +207,8 @@ pub mod SignalRound {
         NightSkipped: NightSkipped,
         MeetingCalled: MeetingCalled,
         RoundEnded: RoundEnded,
+        ReactorSabotaged: ReactorSabotaged,
+        ReactorFixed: ReactorFixed,
         VoteRecorded: VoteRecorded,
         RoundResolved: RoundResolved,
     }
@@ -230,6 +241,14 @@ pub mod SignalRound {
     struct NightSkipped {
         vote_deadline: u64,
     }
+
+    #[derive(Drop, starknet::Event)]
+    struct ReactorSabotaged {
+        deadline: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct ReactorFixed {}
 
     #[derive(Drop, starknet::Event)]
     struct RoundEnded {
@@ -482,6 +501,68 @@ pub mod SignalRound {
             self.emit(NightSkipped { vote_deadline: self.vote_deadline.read() });
         }
 
+        /// Trigger a reactor meltdown.
+        ///
+        /// Signed by a session key, like every other in-round action. The
+        /// contract cannot tell an impostor from a crew member — that is the
+        /// point of the commitment — so it does not try; the client only
+        /// offers this to impostors, exactly as it only offers the kill. A
+        /// crew member who sabotages is simply playing badly.
+        fn sabotage_reactor(ref self: ContractState) {
+            assert(self.phase.read() == phases::NIGHT, 'not night');
+            let seat = self.seat_of_session_key(get_caller_address());
+            assert(!self.dead.read(seat), 'dead cannot sabotage');
+            assert(self.reactor_deadline.read() == 0, 'reactor already going');
+            let deadline = get_block_timestamp() + super::REACTOR_SECS;
+            self.reactor_deadline.write(deadline);
+            self.emit(ReactorSabotaged { deadline });
+        }
+
+        /// Stop the meltdown. Anyone still alive can do it — the cost is that
+        /// they had to drop what they were doing and walk there.
+        fn fix_reactor(ref self: ContractState) {
+            let seat = self.seat_of_session_key(get_caller_address());
+            assert(!self.dead.read(seat), 'dead cannot fix');
+            assert(self.reactor_deadline.read() != 0, 'reactor is stable');
+            assert(get_block_timestamp() <= self.reactor_deadline.read(), 'too late');
+            self.reactor_deadline.write(0);
+            self.emit(ReactorFixed {});
+        }
+
+        /// The meltdown ran out: the impostors win.
+        ///
+        /// Unlike `resolve_round` there is no win condition to check — the
+        /// contract watched the deadline pass with no `fix_reactor`, so the
+        /// outcome is its own evidence. The roles are still opened, because the
+        /// payout needs to know who won.
+        fn resolve_sabotage(ref self: ContractState, host_seed: felt252, salt: felt252) {
+            self.assert_host();
+            assert(self.phase.read() == phases::NIGHT, 'not night');
+            let deadline = self.reactor_deadline.read();
+            assert(deadline != 0, 'reactor is stable');
+            assert(get_block_timestamp() > deadline, 'reactor not blown');
+
+            let hidden_seats = self.open_roles(host_seed, salt);
+            let mut j: u32 = 0;
+            while j != hidden_seats.len() {
+                self.hidden.write(*hidden_seats.at(j), true);
+                j += 1;
+            }
+
+            self.ejected.write(super::NO_SEAT);
+            self.impostor.write(*hidden_seats.at(0) + 1);
+            self.crew_won.write(false);
+            self.phase.write(phases::RESOLVED);
+            self
+                .emit(
+                    RoundResolved {
+                        impostor_seat: *hidden_seats.at(0),
+                        ejected_seat_plus_one: super::NO_SEAT,
+                        crew_won: false,
+                    },
+                );
+        }
+
         /// Close this round's vote and open the next night.
         ///
         /// The contract cannot tell whether the game is over — that needs the
@@ -506,6 +587,9 @@ pub mod SignalRound {
             // Per-round buckets are namespaced, so advancing the counter *is*
             // the reset. Deaths and used meetings deliberately carry over.
             self.round_number.write(round + 1);
+            // A new night starts with a stable reactor - an unfixed meltdown
+            // does not survive into the next round.
+            self.reactor_deadline.write(0);
             let deadline = get_block_timestamp() + self.night_duration.read();
             self.night_deadline.write(deadline);
             self.phase.write(phases::NIGHT);
@@ -547,37 +631,10 @@ pub mod SignalRound {
             self.assert_host();
             assert(self.phase.read() == phases::VOTE, 'not in vote phase');
             assert(self.ballot_closed(), 'vote still open');
-            assert(
-                poseidon_hash_span(array![host_seed].span()) == self.seed_commitment.read(),
-                'seed mismatch',
-            );
 
-            let n = self.player_count.read();
-            let k = self.hidden_count.read();
-
-            // combined = poseidon(host_seed, entropy_0, .., entropy_{n-1})
-            let mut mix: Array<felt252> = array![host_seed];
-            let mut e: u32 = 0;
-            while e != n {
-                mix.append(self.entropy.read(e));
-                e += 1;
-            }
-            let combined = poseidon_hash_span(mix.span());
-            let hidden_seats = super::derive_hidden(combined, n, k).span();
-
-            // The role commitment still has to match: it binds the notes the
-            // host actually handed out to the team the seed produces.
-            let mut data: Array<felt252> = array![];
-            let mut i: u32 = 0;
-            while i != hidden_seats.len() {
-                data.append((*hidden_seats.at(i)).into());
-                i += 1;
-            }
-            data.append(salt);
-            assert(
-                poseidon_hash_span(data.span()) == self.role_commitment.read(),
-                'commitment mismatch',
-            );
+            // Shared with `resolve_sabotage` - two copies of a reveal is how
+            // the two paths quietly drift apart.
+            let hidden_seats = self.open_roles(host_seed, salt);
 
             let mut j: u32 = 0;
             while j != hidden_seats.len() {
@@ -670,6 +727,10 @@ pub mod SignalRound {
             self.round_number.read()
         }
 
+        fn reactor_deadline(self: @ContractState) -> u64 {
+            self.reactor_deadline.read()
+        }
+
         /// True once the deadline passes or every living player has voted.
         fn ballot_is_closed(self: @ContractState) -> bool {
             self.ballot_closed()
@@ -740,6 +801,41 @@ pub mod SignalRound {
             let seat_plus_one = self.session_key_seat.read(signer);
             assert(seat_plus_one != super::NO_SEAT, 'not a session key');
             seat_plus_one - 1
+        }
+
+        /// Verify the host's seed against the commitment and derive the hidden
+        /// team from it. Shared by both resolvers so the reveal can only ever
+        /// happen one way.
+        fn open_roles(
+            self: @ContractState, host_seed: felt252, salt: felt252,
+        ) -> Span<u32> {
+            assert(
+                poseidon_hash_span(array![host_seed].span()) == self.seed_commitment.read(),
+                'seed mismatch',
+            );
+
+            let n = self.player_count.read();
+            let k = self.hidden_count.read();
+            let mut mix: Array<felt252> = array![host_seed];
+            let mut e: u32 = 0;
+            while e != n {
+                mix.append(self.entropy.read(e));
+                e += 1;
+            }
+            let hidden_seats = super::derive_hidden(poseidon_hash_span(mix.span()), n, k).span();
+
+            let mut data: Array<felt252> = array![];
+            let mut i: u32 = 0;
+            while i != hidden_seats.len() {
+                data.append((*hidden_seats.at(i)).into());
+                i += 1;
+            }
+            data.append(salt);
+            assert(
+                poseidon_hash_span(data.span()) == self.role_commitment.read(),
+                'commitment mismatch',
+            );
+            hidden_seats
         }
 
         fn living_count(self: @ContractState) -> u32 {
@@ -840,6 +936,10 @@ pub trait ISignalRoundGame<T> {
     fn total_votes(self: @T) -> u256;
     fn round_number(self: @T) -> u32;
     fn ballot_is_closed(self: @T) -> bool;
+    fn reactor_deadline(self: @T) -> u64;
+    fn sabotage_reactor(ref self: T);
+    fn fix_reactor(ref self: T);
+    fn resolve_sabotage(ref self: T, host_seed: felt252, salt: felt252);
     fn ejection_in(self: @T, round: u32) -> u32;
     fn skip_tally(self: @T) -> u256;
     fn has_called_meeting(self: @T, seat: u32) -> bool;

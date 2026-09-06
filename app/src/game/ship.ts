@@ -129,6 +129,14 @@ export type TaskDef = {
   label: string;
   /** Shown on the station before you start it. */
   blurb: string;
+  /**
+   * Everyone in the room watches you do it.
+   *
+   * Since an impostor can never *complete* a task, being seen finishing a
+   * visual one is a proof of innocence rather than a claim — the one piece of
+   * hard evidence the crew can manufacture for themselves.
+   */
+  visual?: boolean;
 };
 
 /**
@@ -178,6 +186,13 @@ export const TASK_DEFS: TaskDef[] = [
     label: "Tune the comms array",
     blurb: "Hold the needle inside the band.",
   },
+  {
+    kind: "keypad",
+    room: "medbay",
+    label: "Submit to the medbay scan",
+    blurb: "Anyone in Medbay will see you clear the scan.",
+    visual: true,
+  },
 ];
 
 export const TASK_KINDS: TaskKind[] = ["rewire", "keypad", "stabilize"];
@@ -189,6 +204,7 @@ export type TaskInstance = {
   room: RoomId;
   label: string;
   blurb: string;
+  visual?: boolean;
   /**
    * How hard this particular instance is — 3 wires or 5, a 4-digit code or a
    * 6-digit one, two gauge locks or four. Rolled per task so the second time
@@ -209,6 +225,11 @@ export type Sighting = {
    * reward for finishing a task list. See `grantSecurityLog`.
    */
   viaLog?: boolean;
+  /**
+   * The observer watched this player *complete* a visual task. Stronger than
+   * "I saw them there": only crew can complete anything, so it clears them.
+   */
+  visual?: boolean;
 };
 
 export type ShipState = {
@@ -225,6 +246,14 @@ export type ShipState = {
   killReadyAt: number;
   /** Unix ms the lights come back on. 0 = lights are up. */
   lightsOutUntil: number;
+  /**
+   * Unix ms the reactor blows. 0 = stable.
+   *
+   * Mirrors `reactor_deadline` on-chain. Unlike the lights, this one has a
+   * losing outcome, so the fix has to be an on-chain action — otherwise the
+   * contract would be taking someone's word for whether it was reached.
+   */
+  reactorDeadline: number;
 };
 
 const DEFAULT_TASKS_PER_PLAYER = 3;
@@ -254,6 +283,9 @@ export const KILL_COOLDOWN_SECS = 20;
 
 /** Seconds the lights stay out once sabotaged. */
 export const LIGHTS_OUT_SECS = 25;
+
+/** `round.cairo::REACTOR_SECS` — seconds to reach the reactor. */
+export const REACTOR_SECS = 30;
 
 function shuffled<T>(xs: T[]): T[] {
   const a = [...xs];
@@ -325,7 +357,30 @@ export function initShip(
     sightings,
     killReadyAt: now + KILL_COOLDOWN_SECS * 1000,
     lightsOutUntil: 0,
+    reactorDeadline: 0,
   };
+}
+
+export function reactorGoing(ship: ShipState): boolean {
+  return ship.reactorDeadline !== 0;
+}
+
+export function reactorSecsLeft(ship: ShipState, now = Date.now()): number {
+  return ship.reactorDeadline === 0
+    ? 0
+    : Math.max(0, Math.ceil((ship.reactorDeadline - now) / 1000));
+}
+
+export function reactorBlown(ship: ShipState, now = Date.now()): boolean {
+  return ship.reactorDeadline !== 0 && now > ship.reactorDeadline;
+}
+
+export function sabotageReactor(ship: ShipState, now = Date.now()): ShipState {
+  return { ...ship, reactorDeadline: now + REACTOR_SECS * 1000 };
+}
+
+export function fixReactor(ship: ShipState): ShipState {
+  return { ...ship, reactorDeadline: 0 };
 }
 
 /** Whether the impostor may kill right now. */
@@ -393,6 +448,8 @@ export function resetForRound(
     sightings: [],
     killReadyAt: now + KILL_COOLDOWN_SECS * 1000,
     lightsOutUntil: 0,
+    // A new night starts with a stable reactor, matching `end_vote`.
+    reactorDeadline: 0,
   };
 }
 
@@ -436,11 +493,47 @@ export function move(
   return { ...ship, positions, sightings };
 }
 
-export function completeTask(ship: ShipState, seat: number, taskId: string): ShipState {
+export function completeTask(
+  ship: ShipState,
+  seat: number,
+  taskId: string,
+  opts: { isImpostor?: boolean; living?: number[]; now?: number } = {},
+): ShipState {
+  const now = opts.now ?? Date.now();
+
+  // An impostor's tasks are fake. They can open the panel and play it out —
+  // looking busy is the whole disguise — but nothing is recorded: the task
+  // never completes, the shared bar does not move, and the security log stays
+  // shut. Without this, doing tasks was strictly *good* for the impostor,
+  // which inverts the mechanic.
+  if (opts.isImpostor) return ship;
+
+  const task = (ship.tasks[seat] ?? []).find((t) => t.id === taskId);
   const mine = (ship.tasks[seat] ?? []).map((t) =>
     t.id === taskId ? { ...t, done: true } : t,
   );
-  const next: ShipState = { ...ship, tasks: { ...ship.tasks, [seat]: mine } };
+  let next: ShipState = { ...ship, tasks: { ...ship.tasks, [seat]: mine } };
+
+  // A visual task is witnessed by whoever is standing there.
+  if (task?.visual && opts.living) {
+    const room = ship.positions[seat];
+    const watchers = occupants(ship, room, opts.living).filter((x) => x !== seat);
+    if (watchers.length > 0) {
+      next = {
+        ...next,
+        sightings: [
+          ...next.sightings,
+          ...watchers.map((observer) => ({
+            at: now,
+            observer,
+            who: seat,
+            room,
+            visual: true,
+          })),
+        ],
+      };
+    }
+  }
 
   // Finishing your whole list opens the security log.
   const wasIncomplete = (ship.tasks[seat] ?? []).some((t) => !t.done);
@@ -500,10 +593,21 @@ export function taskHere(ship: ShipState, seat: number): TaskInstance | null {
   return (ship.tasks[seat] ?? []).find((t) => t.room === room && !t.done) ?? null;
 }
 
-export function taskProgress(ship: ShipState, living: number[]): { done: number; total: number } {
+/**
+ * The shared crew bar.
+ *
+ * `crewOnly` excludes the impostors' fake lists — counting them would let the
+ * impostor inflate the crew's apparent progress, and would make the bar's total
+ * depend on how many impostors there are.
+ */
+export function taskProgress(
+  ship: ShipState,
+  living: number[],
+  crewOnly?: number[],
+): { done: number; total: number } {
   let done = 0;
   let total = 0;
-  for (const seat of living) {
+  for (const seat of crewOnly ?? living) {
     for (const t of ship.tasks[seat] ?? []) {
       total += 1;
       if (t.done) done += 1;
