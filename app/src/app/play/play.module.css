@@ -554,3 +554,90 @@
 }
 .roomBar .tagline { margin-right: auto; }
 .roomBar .btn { height: 34px; padding: 0 14px; font-size: 13px; }
+
+/* ── host settings ──────────────────────────────────────────────────── */
+
+.settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 8px;
+}
+
+.setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+}
+
+.settingLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.settingHint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dim);
+}
+
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0c0d16;
+}
+.stepBtn {
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.stepBtn:hover:not(:disabled) { background: #232538; }
+.stepBtn:disabled { opacity: 0.3; cursor: not-allowed; }
+.stepValue {
+  min-width: 30px;
+  text-align: center;
+  font-family: var(--font-mono-ui), monospace;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.toggle {
+  position: relative;
+  width: 44px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #0c0d16;
+  cursor: pointer;
+  transition: background 0.16s, border-color 0.16s;
+}
+.toggleOn { background: #12241f; border-color: var(--crew); }
+.toggleKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #5f6280;
+  transition: transform 0.16s, background 0.16s;
+}
+.toggleOn .toggleKnob { transform: translateX(18px); background: var(--crew); }

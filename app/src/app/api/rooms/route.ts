@@ -9,19 +9,21 @@ export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as {
     nightDurationSecs?: number;
     voteDurationSecs?: number;
-    variantKey?: string;
     minPlayers?: number;
     maxPlayers?: number;
     hiddenCount?: number;
+    tasksPerPlayer?: number;
+    confirmEjects?: boolean;
   };
 
   const room = createRoom({
     nightDurationSecs: clamp(body.nightDurationSecs ?? 90, 10, 1200),
     voteDurationSecs: clamp(body.voteDurationSecs ?? 120, 10, 1200),
-    variantKey: body.variantKey,
     minPlayers: body.minPlayers,
     maxPlayers: body.maxPlayers,
     hiddenCount: body.hiddenCount,
+    tasksPerPlayer: body.tasksPerPlayer,
+    confirmEjects: body.confirmEjects,
   });
 
   return NextResponse.json({ code: room.code });

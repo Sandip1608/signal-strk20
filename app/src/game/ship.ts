@@ -198,7 +198,7 @@ export type ShipState = {
   sightings: Sighting[];
 };
 
-const TASKS_PER_PLAYER = 3;
+const DEFAULT_TASKS_PER_PLAYER = 3;
 
 /**
  * Difficulty for one task instance.
@@ -235,25 +235,40 @@ function shuffled<T>(xs: T[]): T[] {
  * The impostor gets a task list too — an impostor with nothing to do is
  * trivially caught by watching who never walks anywhere.
  */
-export function initShip(seats: number[], now = Date.now()): ShipState {
+export function initShip(
+  seats: number[],
+  tasksPerPlayer = DEFAULT_TASKS_PER_PLAYER,
+  now = Date.now(),
+): ShipState {
   const positions = spawnRooms(seats);
   const tasks: Record<number, TaskInstance[]> = {};
 
   for (const seat of seats) {
     // One task of each kind, in a randomly chosen room for that kind: three
     // different puzzles in three different rooms, every time.
-    tasks[seat] = shuffled(TASK_KINDS)
-      .slice(0, TASKS_PER_PLAYER)
-      .map((kind, i) => {
-        const options = TASK_DEFS.filter((d) => d.kind === kind);
-        const def = options[Math.floor(Math.random() * options.length)];
-        return {
-          ...def,
-          id: `${seat}:${def.kind}:${def.room}:${i}`,
-          magnitude: rollMagnitude(kind),
-          done: false,
-        };
-      });
+    // More tasks than puzzle types means repeating a type; the shuffle still
+    // guarantees you see each one before any repeat.
+    const wanted = Math.max(1, tasksPerPlayer);
+    const kinds: TaskKind[] = [];
+    while (kinds.length < wanted) kinds.push(...shuffled(TASK_KINDS));
+
+    // Rooms are claimed as we go. Picking each room independently let a
+    // repeated kind land on the room it already used — two "Fix wiring" in
+    // Electrical, which reads as a bug and leaves one pip for two tasks.
+    const usedRooms = new Set<RoomId>();
+    tasks[seat] = kinds.slice(0, wanted).map((kind, i) => {
+      const options = TASK_DEFS.filter((d) => d.kind === kind);
+      const fresh = options.filter((d) => !usedRooms.has(d.room));
+      const pool = fresh.length > 0 ? fresh : options;
+      const def = pool[Math.floor(Math.random() * pool.length)];
+      usedRooms.add(def.room);
+      return {
+        ...def,
+        id: `${seat}:${def.kind}:${def.room}:${i}`,
+        magnitude: rollMagnitude(kind),
+        done: false,
+      };
+    });
   }
 
   // You can obviously see whoever you started next to, so record it. Without

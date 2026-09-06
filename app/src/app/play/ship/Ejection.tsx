@@ -23,6 +23,7 @@ export function Ejection({
   hiddenLabelSingular,
   crewWon,
   tied,
+  confirmEjects,
 }: {
   /** null when the vote tied and nobody went out the airlock. */
   ejected: { seat: number; name: string } | null;
@@ -33,6 +34,12 @@ export function Ejection({
   hiddenLabelSingular: string;
   crewWon: boolean;
   tied: boolean;
+  /**
+   * Among Us's "Confirm Ejects". When off, the scene does not say whether the
+   * ejected player was an impostor — the crew get no free confirmation and
+   * have to reason from the vote alone.
+   */
+  confirmEjects: boolean;
 }) {
   const caught = ejected !== null && hiddenSeats.includes(ejected.seat);
   const team = hiddenNames.join(" and ");
@@ -72,15 +79,20 @@ export function Ejection({
         {!tied && ejected && (
           <p className={`${s.line} ${s.show}`}>{ejected.name} was ejected.</p>
         )}
-        {beat >= 1 && (
-          <p className={`${s.line} ${s.show} ${crewWon ? s.good : s.bad}`}>
-            {caught
-              ? `${ejected?.name} was ${article(hiddenLabelSingular)}.`
-              : tied
-                ? `${hiddenNames.length > 1 ? "They are" : "They are"} still aboard.`
-                : `${ejected?.name} was not ${article(hiddenLabelSingular)}.`}
-          </p>
-        )}
+        {beat >= 1 &&
+          (confirmEjects ? (
+            <p className={`${s.line} ${s.show} ${crewWon ? s.good : s.bad}`}>
+              {caught
+                ? `${ejected?.name} was ${article(hiddenLabelSingular)}.`
+                : tied
+                  ? "They are still aboard."
+                  : `${ejected?.name} was not ${article(hiddenLabelSingular)}.`}
+            </p>
+          ) : (
+            <p className={`${s.line} ${s.show}`}>
+              {tied ? "Nobody was ejected." : `${ejected?.name} is gone.`}
+            </p>
+          ))}
         {beat >= 2 && (
           <p className={`${s.verdict} ${s.show} ${crewWon ? s.good : s.bad}`}>
             {crewWon ? "Crew win" : `${hiddenLabelSingular} wins`}

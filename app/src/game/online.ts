@@ -41,10 +41,11 @@ export class RelayError extends Error {}
 export async function createRoom(opts: {
   nightDurationSecs: number;
   voteDurationSecs: number;
-  variantKey?: string;
   minPlayers?: number;
   maxPlayers?: number;
   hiddenCount?: number;
+  tasksPerPlayer?: number;
+  confirmEjects?: boolean;
 }): Promise<string> {
   const res = await fetch("/api/rooms", {
     method: "POST",

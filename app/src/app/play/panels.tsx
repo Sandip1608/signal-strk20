@@ -17,7 +17,7 @@ import { useGame } from "@/game/store";
 import { ROOM_BY_ID, sightingsFor, tasksComplete } from "@/game/ship";
 import { livingSeats, short } from "@/game/engine";
 import { type GameState, type Seat } from "@/game/types";
-import { hiddenLabel, variantByKey } from "@/game/variants";
+import { CREW_NAME, IMPOSTOR_NAME, impostorLabel } from "@/game/variants";
 
 // ── Lobby ──────────────────────────────────────────────────────────────────
 
@@ -25,7 +25,6 @@ export function LobbyPanel({ game }: { game: GameState }) {
   const { addPlayer, addBot, fillWithBots, assignRoles } = useGame();
   const [name, setName] = useState("");
 
-  const variant = variantByKey(game.variantKey);
   const full = game.seats.length >= game.maxPlayers;
   const enough = game.seats.length >= game.minPlayers;
 
@@ -41,9 +40,9 @@ export function LobbyPanel({ game }: { game: GameState }) {
       <h2 className={s.panelTitle}>Lobby</h2>
       <p className={s.panelHint}>
         Each player shields their buy-in, generates a burner session key in this browser, and
-        pre-creates the open note their payout will land in. {variant.name} ·{" "}
-        {game.minPlayers}–{game.maxPlayers} players · {game.hiddenCount}{" "}
-        {hiddenLabel(variant, game.hiddenCount).toLowerCase()}.
+        pre-creates the open note their payout will land in. {game.minPlayers}–
+        {game.maxPlayers} players · {game.hiddenCount}{" "}
+        {impostorLabel(game.hiddenCount).toLowerCase()} · {game.tasksPerPlayer} tasks each.
       </p>
 
       <form onSubmit={submit} className={s.btnRow} style={{ marginTop: 0 }}>
@@ -555,8 +554,7 @@ export function ResolvedPanel({ game }: { game: GameState }) {
   const { payout, resetGame } = useGame();
   const [paid, setPaid] = useState(false);
 
-  const variant = variantByKey(game.variantKey);
-  // The whole hidden team, not just one seat — a variant may have two or three.
+  // The whole impostor team, not just one seat — a round may have two or three.
   const hidden = game.hiddenSeats;
   const hiddenSeatObjs = game.seats.filter((x) => hidden.includes(x.seat));
   const ejected: Seat | undefined =
@@ -568,9 +566,10 @@ export function ResolvedPanel({ game }: { game: GameState }) {
         ejected={ejected ? { seat: ejected.seat, name: ejected.name } : null}
         hiddenSeats={hidden}
         hiddenNames={hiddenSeatObjs.map((x) => x.name)}
-        hiddenLabelSingular={variant.hiddenName}
+        hiddenLabelSingular={IMPOSTOR_NAME}
         crewWon={game.crewWon}
         tied={game.ejected === 0}
+        confirmEjects={game.confirmEjects}
       />
 
       <div className={s.crewRow}>
@@ -583,10 +582,10 @@ export function ResolvedPanel({ game }: { game: GameState }) {
             faded={!hidden.includes(x.seat) && !game.crewWon}
             tag={
               hidden.includes(x.seat)
-                ? variant.hiddenName.toLowerCase()
+                ? IMPOSTOR_NAME.toLowerCase()
                 : game.crewWon
-                  ? `${variant.crewName.toLowerCase()} · paid`
-                  : variant.crewName.toLowerCase()
+                  ? `${CREW_NAME.toLowerCase()} · paid`
+                  : CREW_NAME.toLowerCase()
             }
           />
         ))}
@@ -627,7 +626,7 @@ export function ResolvedPanel({ game }: { game: GameState }) {
           <KeyValue k="Commitment" v={short(game.roleCommitment, 12, 8)} />
           <KeyValue k="Salt (revealed)" v={short(game.salt, 12, 8)} />
           <KeyValue
-            k={`${hiddenLabel(variant, game.hiddenCount)} seat${game.hiddenCount === 1 ? "" : "s"}`}
+            k={`${impostorLabel(game.hiddenCount)} seat${game.hiddenCount === 1 ? "" : "s"}`}
             v={hidden.join(", ")}
           />
           <KeyValue k="Total votes" v={String(game.totalVotes)} />

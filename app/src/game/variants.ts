@@ -1,114 +1,92 @@
 /**
- * Game variants, as contract configuration.
+ * Among Us, with the settings a host actually tweaks.
  *
- * The RFP asks for one platform covering Among Us, Secret Hitler, Avalon,
- * Blood on the Clocktower and One Night Werewolf, with "each variant operable
- * as a different contract configuration".
+ * This used to carry five "variants" — Among Us, One Night Werewolf, Secret
+ * Hitler, Avalon, Blood on the Clocktower. That was dropped deliberately.
+ * Measured, only three of the five were mechanically distinct: Werewolf,
+ * Secret Hitler and Avalon were byte-identical configurations (5-10 players,
+ * 2 hidden) differing only in vocabulary. Worse, Avalon and Secret Hitler have
+ * no night kill at all — Avalon is quests, Secret Hitler is policy cards — so
+ * modelling them as "hidden team kills someone at night" misrepresented the
+ * games they were named after.
  *
- * What those games actually share is the skeleton `round.cairo` implements: a
- * hidden minority, a private night action, and an anonymous vote with a
- * publicly computable tally. What differs is table size and how big the hidden
- * team is — so those are constructor arguments, not forks of the contract.
- *
- * Be precise about the claim: this generalises the *shared* mechanic, and each
- * variant here plays its hidden-role elimination round. It does not implement
- * each game's full ruleset (Secret Hitler's policy deck, Avalon's quests,
- * Clocktower's character abilities). Those are per-variant round logic layered
- * on this base, and are not built.
+ * Claiming one game you actually implement beats claiming five where two are
+ * wrong. The generalisation the RFP asks about is still real and still in the
+ * contract: `SignalRound` takes `min_players`, `max_players` and
+ * `hidden_count`, so another hidden-role game is a different constructor call,
+ * not a fork. It is simply not dressed up as five menu entries.
  */
 
-export type Variant = {
-  key: string;
-  name: string;
-  /** What the hidden team is called in this game. */
-  hiddenName: string;
-  /** Explicit plural — "werewolfs" and "minion of Mordreds" are not words. */
-  hiddenPlural: string;
-  /** What everyone else is called. */
-  crewName: string;
-  minPlayers: number;
+export type Settings = {
+  /** Seats the lobby will accept. Among Us runs 4-15; the contract caps at 15. */
   maxPlayers: number;
-  /** Size of the hidden team. The contract requires 2 * hidden < minPlayers. */
-  hiddenCount: number;
-  blurb: string;
+  /** How many impostors. The contract requires 2 * impostors < minPlayers. */
+  impostors: number;
+  /** Tasks dealt to each player. */
+  tasksPerPlayer: number;
+  /** Seconds of free roam before a meeting can be forced. */
+  nightSecs: number;
+  /** Seconds the ballot stays open. */
+  voteSecs: number;
+  /**
+   * Among Us's "Confirm Ejects". When off, the ejection scene does not say
+   * whether the ejected player was an impostor — a real and much harder way to
+   * play, because the crew never get a free confirmation.
+   */
+  confirmEjects: boolean;
 };
 
-export const VARIANTS: Variant[] = [
-  {
-    key: "among-us",
-    name: "Among Us",
-    hiddenName: "Impostor",
-    hiddenPlural: "Impostors",
-    crewName: "Crew",
-    minPlayers: 5,
-    maxPlayers: 15,
-    hiddenCount: 1,
-    blurb: "One impostor aboard. Do your tasks, survive the night, vote them out.",
-  },
-  {
-    key: "one-night-werewolf",
-    name: "One Night Werewolf",
-    hiddenName: "Werewolf",
-    hiddenPlural: "Werewolves",
-    crewName: "Villager",
-    minPlayers: 5,
-    maxPlayers: 10,
-    hiddenCount: 2,
-    blurb: "Two werewolves among the villagers. A single night, a single vote.",
-  },
-  {
-    key: "secret-hitler",
-    name: "Secret Hitler",
-    hiddenName: "Fascist",
-    hiddenPlural: "Fascists",
-    crewName: "Liberal",
-    minPlayers: 5,
-    maxPlayers: 10,
-    hiddenCount: 2,
-    blurb: "Two fascists hidden in the assembly. Find them before they act.",
-  },
-  {
-    key: "avalon",
-    name: "Avalon",
-    hiddenName: "Minion of Mordred",
-    hiddenPlural: "Minions of Mordred",
-    crewName: "Loyal Servant",
-    minPlayers: 5,
-    maxPlayers: 10,
-    hiddenCount: 2,
-    blurb: "Mordred's minions sit at the round table. Unmask one to win.",
-  },
-  {
-    key: "clocktower",
-    name: "Blood on the Clocktower",
-    hiddenName: "Evil",
-    hiddenPlural: "Evil",
-    crewName: "Townsfolk",
-    minPlayers: 7,
-    maxPlayers: 15,
-    hiddenCount: 3,
-    blurb: "Three evil among the townsfolk. Execute one and the town holds.",
-  },
-];
+export const IMPOSTOR_NAME = "Impostor";
+export const IMPOSTOR_PLURAL = "Impostors";
+export const CREW_NAME = "Crew";
 
-/** The right noun for a count, so nothing renders "2 werewolfs". */
-export function hiddenLabel(v: Variant, count: number): string {
-  return count === 1 ? v.hiddenName : v.hiddenPlural;
+export const MIN_IMPOSTORS = 1;
+export const MAX_IMPOSTORS = 3;
+export const MIN_TASKS = 1;
+export const MAX_TASKS = 5;
+/** `SignalRound::CEIL_PLAYERS`. */
+export const PLAYER_CEILING = 15;
+
+export const DEFAULT_SETTINGS: Settings = {
+  maxPlayers: 10,
+  impostors: 1,
+  tasksPerPlayer: 3,
+  nightSecs: 90,
+  voteSecs: 120,
+  confirmEjects: true,
+};
+
+/**
+ * Seats needed before roles can be assigned.
+ *
+ * Derived rather than configured: the contract asserts
+ * `2 * hidden_count < min_players`, so the impostors must be a strict
+ * minority. Exposing both numbers would just let a host build a lobby that
+ * the constructor rejects.
+ */
+export function minPlayersFor(impostors: number): number {
+  return Math.max(5, impostors * 2 + 1);
 }
 
-export const DEFAULT_VARIANT = VARIANTS[0];
-
-export function variantByKey(key: string): Variant {
-  return VARIANTS.find((v) => v.key === key) ?? DEFAULT_VARIANT;
+/** The right noun for a count, so nothing renders "2 impostor". */
+export function impostorLabel(count: number): string {
+  return count === 1 ? IMPOSTOR_NAME : IMPOSTOR_PLURAL;
 }
 
-/** Mirrors the constructor's guard: the hidden team must be a strict minority. */
-export function isValidVariant(v: Variant): boolean {
-  return (
-    v.minPlayers >= 3 &&
-    v.maxPlayers <= 15 &&
-    v.minPlayers <= v.maxPlayers &&
-    v.hiddenCount >= 1 &&
-    v.hiddenCount * 2 < v.minPlayers
-  );
+/** Clamp a settings object into something the contract will accept. */
+export function normalise(s: Settings): Settings {
+  const impostors = clamp(s.impostors, MIN_IMPOSTORS, MAX_IMPOSTORS);
+  const floor = minPlayersFor(impostors);
+  return {
+    impostors,
+    maxPlayers: clamp(s.maxPlayers, floor, PLAYER_CEILING),
+    tasksPerPlayer: clamp(s.tasksPerPlayer, MIN_TASKS, MAX_TASKS),
+    nightSecs: clamp(s.nightSecs, 10, 1200),
+    voteSecs: clamp(s.voteSecs, 10, 1200),
+    confirmEjects: s.confirmEjects,
+  };
+}
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, Math.round(n)));
 }

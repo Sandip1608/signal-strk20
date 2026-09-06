@@ -215,7 +215,7 @@ export const useGame = create<Store>((set, get) => ({
     set({
       viewerSeat: null,
       revealed: false,
-      ship: g ? ship.initShip(g.seats.map((x) => x.seat)) : null,
+      ship: g ? ship.initShip(g.seats.map((x) => x.seat), g.tasksPerPlayer) : null,
     });
   },
 

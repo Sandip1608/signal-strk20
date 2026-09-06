@@ -82,11 +82,17 @@ export type GameState = {
   escrow: string;
   phase: PhaseValue;
 
-  /** Variant configuration — the contract's constructor arguments. */
-  variantKey: string;
+  /** The contract's constructor arguments. */
   minPlayers: number;
   maxPlayers: number;
   hiddenCount: number;
+  /**
+   * Client-side round settings. Neither exists on-chain: the contract has no
+   * concept of a task, and "confirm ejects" is purely how the reveal is
+   * presented.
+   */
+  tasksPerPlayer: number;
+  confirmEjects: boolean;
 
   seats: Seat[];
 

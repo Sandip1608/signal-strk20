@@ -22,7 +22,18 @@ import { useGame } from "@/game/store";
 import { useBotDriver } from "@/game/useBotDriver";
 import { useRoomSync } from "@/game/useRoomSync";
 import { Phase, type GameState } from "@/game/types";
-import { DEFAULT_VARIANT, VARIANTS, hiddenLabel, type Variant } from "@/game/variants";
+import {
+  DEFAULT_SETTINGS,
+  MAX_IMPOSTORS,
+  MAX_TASKS,
+  MIN_IMPOSTORS,
+  MIN_TASKS,
+  PLAYER_CEILING,
+  impostorLabel,
+  minPlayersFor,
+  normalise,
+  type Settings,
+} from "@/game/variants";
 
 const NIGHT_SECS = 90;
 const VOTE_SECS = 120;
@@ -35,12 +46,13 @@ const VOTE_SECS = 120;
  * keeps a usable night and cuts the *vote* — a 10s night left no time to reach
  * a room, let alone finish a task.
  */
+/** Presets that fill the length fields; the host can still tune them. */
 const PACES = [
   { key: "demo", label: "Demo", night: 35, vote: 15 },
   { key: "quick", label: "Quick", night: 60, vote: 40 },
   { key: "full", label: "Full", night: NIGHT_SECS, vote: VOTE_SECS },
-  // The RFP asks for roughly 15-minute rounds; this is that, and it is the
-  // pace a real table of 10+ actually needs to walk the deck and argue.
+  // Roughly the 15-minute round the RFP describes, and the pace a table of
+  // 10+ actually needs to walk the deck and argue.
   { key: "table", label: "Table", night: 600, vote: 240 },
 ] as const;
 
@@ -168,11 +180,61 @@ function bannerText(game: GameState) {
 type RoundConfig = {
   nightDurationSecs: number;
   voteDurationSecs: number;
-  variantKey: string;
   minPlayers: number;
   maxPlayers: number;
   hiddenCount: number;
+  tasksPerPlayer: number;
+  confirmEjects: boolean;
 };
+
+/** One labelled +/- stepper. */
+function Stepper({
+  label,
+  hint,
+  value,
+  min,
+  max,
+  onChange,
+  format,
+}: {
+  label: string;
+  hint?: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (n: number) => void;
+  format?: (n: number) => string;
+}) {
+  return (
+    <div className={s.setting}>
+      <span className={s.settingLabel}>
+        {label}
+        {hint && <span className={s.settingHint}>{hint}</span>}
+      </span>
+      <span className={s.stepper}>
+        <button
+          type="button"
+          className={s.stepBtn}
+          onClick={() => onChange(value - 1)}
+          disabled={value <= min}
+          aria-label={`Fewer ${label}`}
+        >
+          −
+        </button>
+        <span className={s.stepValue}>{format ? format(value) : value}</span>
+        <button
+          type="button"
+          className={s.stepBtn}
+          onClick={() => onChange(value + 1)}
+          disabled={value >= max}
+          aria-label={`More ${label}`}
+        >
+          +
+        </button>
+      </span>
+    </div>
+  );
+}
 
 function StartScreen({
   onStart,
@@ -185,62 +247,106 @@ function StartScreen({
   onJoin: (code: string, name: string) => void;
   connecting: boolean;
 }) {
-  const [pace, setPace] = useState<(typeof PACES)[number]>(PACES[2]);
-  const [variant, setVariant] = useState<Variant>(DEFAULT_VARIANT);
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
 
-  // Exactly the arguments `SignalRound`'s constructor takes.
+  const set = (patch: Partial<Settings>) =>
+    setSettings((prev) => normalise({ ...prev, ...patch }));
+
+  const minPlayers = minPlayersFor(settings.impostors);
   const config: RoundConfig = {
-    nightDurationSecs: pace.night,
-    voteDurationSecs: pace.vote,
-    variantKey: variant.key,
-    minPlayers: variant.minPlayers,
-    maxPlayers: variant.maxPlayers,
-    hiddenCount: variant.hiddenCount,
+    nightDurationSecs: settings.nightSecs,
+    voteDurationSecs: settings.voteSecs,
+    minPlayers,
+    maxPlayers: settings.maxPlayers,
+    hiddenCount: settings.impostors,
+    tasksPerPlayer: settings.tasksPerPlayer,
+    confirmEjects: settings.confirmEjects,
   };
 
   return (
     <div className={s.panel}>
       <h2 className={s.panelTitle}>On-chain Among Us</h2>
       <p className={s.panelHint}>
-        One round, 5–15 players, a hidden minority. Roles are encrypted notes only
-        their holder can decrypt. The night kill is a private transfer. Votes are anonymous transfers
+One round aboard the ship. Roles are encrypted notes only their holder can decrypt. The night kill is a private transfer. Votes are anonymous transfers
         with a publicly computable tally. The payout is a shielded credit — never a public transfer.
       </p>
 
       <div className={s.section}>
         <p className={s.note}>
           <strong>How this round is secured.</strong> The host commits to{" "}
-          <code>poseidon(impostor_seat, salt)</code> before anyone votes and opens it after, so the
-          draw is binding. Every in-round action is signed by a burner session key generated in this
-          browser — never by the wallet that shielded the buy-in.
+          <code>poseidon(host_seed)</code> <em>before anyone joins</em>, and every player adds
+          entropy when they take a seat. At the reveal the contract mixes them and derives the
+          impostors itself — the host never names them, so neither side can steer the draw. Every
+          in-round action is signed by a burner session key generated in this browser, never by the
+          wallet that shielded the buy-in.
         </p>
       </div>
 
+      {/* ── host settings ───────────────────────────────────────────── */}
       <div className={s.section}>
-        <p className={s.panelHint} style={{ marginBottom: 10 }}>
-          Variant — the same contract, different constructor arguments: table size and how big the
-          hidden team is.
+        <h3 className={s.panelTitle} style={{ fontSize: 15 }}>
+          Round settings
+        </h3>
+        <p className={s.panelHint}>
+          Impostors, table size and round length are the contract's constructor
+          arguments. Tasks and Confirm Ejects are client-side — the contract has no concept of a
+          task, and confirming an eject is only how the reveal is presented.
         </p>
-        <div className={s.btnRow} style={{ marginTop: 0 }}>
-          {VARIANTS.map((v) => (
+
+        <div className={s.settings}>
+          <Stepper
+            label="Impostors"
+            value={settings.impostors}
+            min={MIN_IMPOSTORS}
+            max={MAX_IMPOSTORS}
+            onChange={(n) => set({ impostors: n })}
+            hint={`needs ${minPlayersFor(settings.impostors)}+ players`}
+          />
+          <Stepper
+            label="Max players"
+            value={settings.maxPlayers}
+            min={minPlayers}
+            max={PLAYER_CEILING}
+            onChange={(n) => set({ maxPlayers: n })}
+          />
+          <Stepper
+            label="Tasks each"
+            value={settings.tasksPerPlayer}
+            min={MIN_TASKS}
+            max={MAX_TASKS}
+            onChange={(n) => set({ tasksPerPlayer: n })}
+          />
+
+          <div className={s.setting}>
+            <span className={s.settingLabel}>
+              Confirm ejects
+              <span className={s.settingHint}>
+                {settings.confirmEjects
+                  ? "the reveal says if they were an impostor"
+                  : "the reveal stays silent — much harder"}
+              </span>
+            </span>
             <button
-              key={v.key}
               type="button"
-              onClick={() => setVariant(v)}
-              className={`${s.btn} ${variant.key === v.key ? "" : s.btnGhost}`}
+              role="switch"
+              aria-checked={settings.confirmEjects}
+              onClick={() => set({ confirmEjects: !settings.confirmEjects })}
+              className={`${s.toggle} ${settings.confirmEjects ? s.toggleOn : ""}`}
             >
-              {v.name}
+              <span className={s.toggleKnob} />
             </button>
-          ))}
+          </div>
         </div>
-        <p className={s.tagline} style={{ display: "block", marginTop: 10 }}>
-          {variant.blurb} · {variant.minPlayers}–{variant.maxPlayers} players ·{" "}
-          {variant.hiddenCount} {hiddenLabel(variant, variant.hiddenCount).toLowerCase()}
+
+        <p className={s.tagline} style={{ display: "block", marginTop: 12 }}>
+          {minPlayers}–{settings.maxPlayers} players · {settings.impostors}{" "}
+          {impostorLabel(settings.impostors).toLowerCase()} · {settings.tasksPerPlayer} tasks each
         </p>
       </div>
 
+      {/* ── round length ────────────────────────────────────────────── */}
       <div className={s.section}>
         <p className={s.panelHint} style={{ marginBottom: 10 }}>
           Round length — the host can only resolve once the vote deadline has passed, so pick
@@ -251,8 +357,10 @@ function StartScreen({
             <button
               key={o.key}
               type="button"
-              onClick={() => setPace(o)}
-              className={`${s.btn} ${pace.key === o.key ? "" : s.btnGhost}`}
+              onClick={() => set({ nightSecs: o.night, voteSecs: o.vote })}
+              className={`${s.btn} ${
+                settings.nightSecs === o.night && settings.voteSecs === o.vote ? "" : s.btnGhost
+              }`}
             >
               {o.label} · {o.night >= 120 ? `${Math.round(o.night / 60)}m` : `${o.night}s`} night
             </button>
@@ -269,12 +377,12 @@ function StartScreen({
           New round
         </button>
         <span className={s.tagline}>
-          One screen, pass the device · {pace.night}s deck, {pace.vote}s vote
+          One screen, pass the device · {settings.nightSecs}s deck, {settings.voteSecs}s vote
         </span>
       </div>
 
       {/* ── play across devices ─────────────────────────────────────── */}
-      <div className={s.section}>
+      <div className={s.section} style={{ marginTop: 26 }}>
         <h3 className={s.panelTitle} style={{ fontSize: 15 }}>
           Play from separate devices
         </h3>

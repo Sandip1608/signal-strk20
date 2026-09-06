@@ -43,10 +43,11 @@ export function createGame(opts: {
   host: string;
   nightDurationSecs: number;
   voteDurationSecs: number;
-  variantKey?: string;
   minPlayers?: number;
   maxPlayers?: number;
   hiddenCount?: number;
+  tasksPerPlayer?: number;
+  confirmEjects?: boolean;
   seedCommitment?: string;
 }): GameState {
   require_(opts.host.length > 0, "host required");
@@ -66,10 +67,11 @@ export function createGame(opts: {
     host: opts.host,
     escrow: "",
     phase: Phase.LOBBY,
-    variantKey: opts.variantKey ?? "among-us",
     minPlayers,
     maxPlayers,
     hiddenCount,
+    tasksPerPlayer: opts.tasksPerPlayer ?? 3,
+    confirmEjects: opts.confirmEjects ?? true,
     seats: [],
     seedCommitment: opts.seedCommitment ?? "",
     roleCommitment: "",

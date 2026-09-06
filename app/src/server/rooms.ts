@@ -89,10 +89,11 @@ function sweep() {
 export function createRoom(opts: {
   nightDurationSecs: number;
   voteDurationSecs: number;
-  variantKey?: string;
   minPlayers?: number;
   maxPlayers?: number;
   hiddenCount?: number;
+  tasksPerPlayer?: number;
+  confirmEjects?: boolean;
 }): Room {
   sweep();
   const code = newCode();
@@ -199,7 +200,10 @@ export function applyAction(room: Room, action: Action): void {
 
     case "startNight":
       room.game = engine.startNight(g0);
-      room.ship = ship.initShip(room.game.seats.map((s) => s.seat));
+      room.ship = ship.initShip(
+        room.game.seats.map((s) => s.seat),
+        room.game.tasksPerPlayer,
+      );
       break;
 
     case "move":

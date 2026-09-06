@@ -123,7 +123,7 @@ in a submission or a demo.
 | Game resolution | done | `resolve_round`, strict-argmax ejection |
 | 5-15 players | done | configurable per variant, `CEIL_PLAYERS = 15` |
 | ~15-minute rounds | done | "Table" pace = 10 min night + 4 min vote |
-| Multiple variants as contract configuration | done (skeleton) | `variants.ts`, constructor takes `min/max/hidden_count` |
+| Multiple variants as contract configuration | **contract yes, UI no** | constructor takes `min/max/hidden_count`, so another hidden-role game is a different constructor call. The five-variant *picker* was removed — see below. |
 | Role assignment from a committed seed | **partial** | `poseidon(hidden_seats…, salt)` commit-reveal: binding, **not unbiased** — the host alone draws it. No VRF, no multi-party. |
 | Session keys, scoped per game | **partial** | real Stark keypairs; `join` asserts `session_key != caller`; but nothing is signed on-chain yet |
 | Public tally, unattributable votes | **design only** | `handle_vote` is escrow-only and public by construction; never deployed or called |
@@ -260,6 +260,31 @@ corridors, fog of war (you see only who is in *your* room), a per-player
 task list, and three hand-rolled minigames — wire matching, a keypad, and
 a timing gauge. No canvas, no game library; the only per-frame animation is
 the gauge needle inside its own modal.
+
+**The five-variant picker was removed; it is Among Us with host settings.**
+Measured, only three of the five were mechanically distinct — One Night
+Werewolf, Secret Hitler and Avalon were byte-identical configurations (5-10
+players, 2 hidden) differing only in vocabulary. Worse, Avalon and Secret
+Hitler have **no night kill at all** (quests and policy cards respectively), so
+presenting them as "hidden team kills someone at night" misrepresented the
+games they were named after — the kind of thing a judge who knows those games
+would catch. Claiming one game you actually implement beats claiming five where
+two are wrong.
+
+The generalisation the RFP asks about is still real and still in the contract:
+`SignalRound` takes `min_players`, `max_players` and `hidden_count`, so another
+hidden-role game is a different constructor call, not a fork. It is simply not
+dressed up as menu entries. If you re-add variants, give them genuinely
+different night actions first.
+
+Instead the host tweaks the round: impostors (1-3), max players (up to 15),
+tasks each (1-5), round lengths, and **Confirm Ejects** — Among Us's real
+setting, where turning it off means the reveal never says whether the ejected
+player was an impostor. `minPlayers` is *derived* (`2 * impostors + 1`, floor 5)
+rather than configured, because the constructor asserts
+`2 * hidden_count < min_players`; exposing both would just let a host build a
+lobby the constructor rejects. Tasks-per-player and confirm-ejects are
+client-side only — the contract has no concept of a task.
 
 **Tasks are three distinct puzzles, scaled per instance.** The first version
 drew 3 of 5 task defs at random, where `rewire` and `keypad` each appeared
