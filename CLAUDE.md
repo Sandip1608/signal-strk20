@@ -261,6 +261,21 @@ task list, and three hand-rolled minigames — wire matching, a keypad, and
 a timing gauge. No canvas, no game library; the only per-frame animation is
 the gauge needle inside its own modal.
 
+**The ballot closes as soon as everyone has voted** — the deadline is now a
+ceiling, not a wait. `ballot_closed()` returns true on either the timer *or*
+every living player having voted, and both `end_vote` and `resolve_round`
+assert it instead of the raw deadline.
+
+The subtle part: votes are anonymous, so the contract cannot see *who* voted,
+only the total weight that arrived. It therefore compares
+`total_votes_of[round] >= living_count`. That is sound **only because each
+player shields exactly one vote stake** — nobody can reach the threshold early
+by voting twice, because there is no second stake to spend. If vote weighting
+ever changes, this check changes with it; four tests pin the arithmetic.
+
+Measured: a 600s vote clock closed 5.1s after the meeting opened, the moment
+the fifth of five living players voted.
+
 **Multi-round works by host-declares / contract-verifies.** The contract
 cannot evaluate a win condition mid-game: that needs the roles, and they stay
 sealed until the reveal. So the host chooses — `end_vote()` to play on,

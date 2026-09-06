@@ -15,7 +15,7 @@ import { CrewCard } from "./ship/Crewmate";
 import { Ejection } from "./ship/Ejection";
 import { useGame } from "@/game/store";
 import { ROOM_BY_ID, sightingsFor, tasksComplete } from "@/game/ship";
-import { livingSeats, short } from "@/game/engine";
+import { ballotClosed, livingSeats, short } from "@/game/engine";
 import { SKIP_VOTE, type GameState, type Seat } from "@/game/types";
 import { CREW_NAME, IMPOSTOR_NAME, impostorLabel } from "@/game/variants";
 
@@ -380,7 +380,14 @@ export function VotePanel({ game }: { game: GameState }) {
   const { viewerSeat, revealed, setViewer, reveal, cover, vote, resolve, ship, mode, endVote } =
     useGame();
   const online = mode === "online";
-  const voteClosed = useDeadline(game.voteDeadline);
+  const deadline = useDeadline(game.voteDeadline);
+  // Either the clock ran out, or everyone has voted — no reason to sit and
+  // watch a timer nobody is still using.
+  const everyoneVoted = livingSeats(game).every((x) => x.hasVoted);
+  const voteClosed = {
+    passed: deadline.passed || everyoneVoted || ballotClosed(game),
+    secondsLeft: deadline.secondsLeft,
+  };
 
   const living = livingSeats(game);
   const toVote = living.filter((x) => !x.hasVoted);
@@ -510,12 +517,12 @@ export function VotePanel({ game }: { game: GameState }) {
         </button>
         <span className={s.tagline}>
           {!voteClosed.passed
-            ? // resolve_round asserts now > vote_deadline, so the button stays
-              // disabled rather than firing a call that can only revert.
-              toVote.length > 0
-              ? `${toVote.length} still to vote — the ballot stays open either way`
-              : "All votes in — the ballot still has to run its clock"
-            : "Ballot closed. Play on, or open the commitment to finish — resolving before the game is actually over is rejected."}
+            ? // The host actions assert `ballot_closed()`, so they stay disabled
+              // rather than firing a call that can only revert.
+              `${toVote.length} still to vote — or wait out the clock`
+            : everyoneVoted
+              ? "Everyone has voted. No need to wait for the clock."
+              : "Ballot closed. Play on, or open the commitment to finish — resolving before the game is actually over is rejected."}
         </span>
       </div>
     </div>

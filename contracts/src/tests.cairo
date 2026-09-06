@@ -141,6 +141,41 @@ mod tests {
         assert(!ejects(0, false, 0), 'no votes should eject nobody');
     }
 
+    // ── closing the ballot early ──────────────────────────────────────────
+
+    /// Mirrors the vote-count half of `ballot_closed()`.
+    ///
+    /// The contract cannot see who voted - the legs are anonymous - so it
+    /// compares total weight against the living count. That is sound only
+    /// because each player shields exactly one vote stake; these pin the
+    /// arithmetic so a change to vote weighting cannot silently let a round be
+    /// closed before everyone has had their say.
+    fn everyone_voted(total_weight: u256, alive: u32) -> bool {
+        let alive_u: u256 = alive.into();
+        total_weight >= alive_u
+    }
+
+    #[test]
+    fn ballot_closes_when_every_living_player_has_voted() {
+        assert(everyone_voted(4, 4), 'four of four should close');
+    }
+
+    #[test]
+    fn ballot_stays_open_with_a_vote_outstanding() {
+        assert(!everyone_voted(3, 4), 'one missing should hold');
+    }
+
+    #[test]
+    fn the_dead_are_not_waited_for() {
+        // Five seats, one killed: four votes is everyone who can still vote.
+        assert(everyone_voted(4, 4), 'should not wait on a corpse');
+    }
+
+    #[test]
+    fn no_votes_at_all_keeps_the_ballot_open() {
+        assert(!everyone_voted(0, 5), 'zero votes should hold');
+    }
+
     // ── multi-round ending ────────────────────────────────────────────────
 
     /// Mirrors the assert in `resolve_round`. The host picks when to stop, so

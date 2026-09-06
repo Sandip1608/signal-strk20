@@ -385,6 +385,23 @@ export function computeEjected(state: GameState): number {
  * so it has no crypto dependency); it must equal what was posted.
  */
 /**
+ * Whether the ballot may be closed — mirrors `ballot_closed()`.
+ *
+ * The deadline is one way; everybody having voted is the other, and waiting
+ * out a clock nobody is still using is just dead air.
+ *
+ * On-chain the votes are anonymous, so the contract cannot see *who* voted,
+ * only the total weight that arrived. Each player shields exactly one vote
+ * stake, so that total reaching the living count is precisely "everyone has
+ * voted" — which is why this counts weight rather than checking `hasVoted`.
+ */
+export function ballotClosed(state: GameState, now = Date.now()): boolean {
+  if (now > state.voteDeadline) return true;
+  const living = state.seats.filter((x) => !x.dead).length;
+  return living > 0 && state.totalVotes >= BigInt(living);
+}
+
+/**
  * `end_vote()` - close this round's vote and open the next night.
  *
  * The contract cannot tell whether the game is over: that needs the roles, and
@@ -397,7 +414,7 @@ export function computeEjected(state: GameState): number {
  */
 export function endVote(state: GameState, now = Date.now()): GameState {
   require_(state.phase === Phase.VOTE, "not in vote phase");
-  require_(now > state.voteDeadline, "vote still open");
+  require_(ballotClosed(state, now), "vote still open");
   require_(state.roundNumber + 1 < MAX_ROUNDS, "too many rounds");
 
   const ejected = computeEjected(state);
@@ -450,7 +467,7 @@ export function resolveRound(
   now = Date.now(),
 ): GameState {
   require_(state.phase === Phase.VOTE, "not in vote phase");
-  require_(now > state.voteDeadline, "vote still open");
+  require_(ballotClosed(state, now), "vote still open");
   require_(p.recomputedSeedCommitment === state.seedCommitment, "seed mismatch");
   require_(p.hiddenSeats.length === state.hiddenCount, "wrong hidden count");
   for (const seat of p.hiddenSeats) {

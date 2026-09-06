@@ -492,7 +492,7 @@ pub mod SignalRound {
         fn end_vote(ref self: ContractState) {
             self.assert_host();
             assert(self.phase.read() == phases::VOTE, 'not in vote phase');
-            assert(get_block_timestamp() > self.vote_deadline.read(), 'vote still open');
+            assert(self.ballot_closed(), 'vote still open');
 
             let round = self.round_number.read();
             assert(round + 1 < super::MAX_ROUNDS, 'too many rounds');
@@ -546,7 +546,7 @@ pub mod SignalRound {
         fn resolve_round(ref self: ContractState, host_seed: felt252, salt: felt252) {
             self.assert_host();
             assert(self.phase.read() == phases::VOTE, 'not in vote phase');
-            assert(get_block_timestamp() > self.vote_deadline.read(), 'vote still open');
+            assert(self.ballot_closed(), 'vote still open');
             assert(
                 poseidon_hash_span(array![host_seed].span()) == self.seed_commitment.read(),
                 'seed mismatch',
@@ -670,6 +670,11 @@ pub mod SignalRound {
             self.round_number.read()
         }
 
+        /// True once the deadline passes or every living player has voted.
+        fn ballot_is_closed(self: @ContractState) -> bool {
+            self.ballot_closed()
+        }
+
         /// `seat + 1` ejected in `round`; 0 = nobody.
         fn ejection_in(self: @ContractState, round: u32) -> u32 {
             self.ejection_of.read(round)
@@ -735,6 +740,37 @@ pub mod SignalRound {
             let seat_plus_one = self.session_key_seat.read(signer);
             assert(seat_plus_one != super::NO_SEAT, 'not a session key');
             seat_plus_one - 1
+        }
+
+        fn living_count(self: @ContractState) -> u32 {
+            let n = self.player_count.read();
+            let mut alive: u32 = 0;
+            let mut seat: u32 = 0;
+            while seat != n {
+                if !self.dead.read(seat) {
+                    alive += 1;
+                }
+                seat += 1;
+            }
+            alive
+        }
+
+        /// Whether the ballot may be closed.
+        ///
+        /// The deadline is one way; everybody having voted is the other, and
+        /// waiting out a clock nobody is still using is just dead air.
+        ///
+        /// Votes are anonymous, so the contract cannot see *who* voted — only
+        /// the total weight that arrived. Each player shields exactly one vote
+        /// stake, so that total reaching the living count is precisely
+        /// "everyone has voted". Nobody can reach it early by voting twice
+        /// without a second stake to spend.
+        fn ballot_closed(self: @ContractState) -> bool {
+            if get_block_timestamp() > self.vote_deadline.read() {
+                return true;
+            }
+            let alive: u256 = self.living_count().into();
+            self.total_votes_of.read(self.round_number.read()) >= alive
         }
 
         fn open_vote(ref self: ContractState) {
@@ -803,6 +839,7 @@ pub trait ISignalRoundGame<T> {
     fn role_commitment(self: @T) -> felt252;
     fn total_votes(self: @T) -> u256;
     fn round_number(self: @T) -> u32;
+    fn ballot_is_closed(self: @T) -> bool;
     fn ejection_in(self: @T, round: u32) -> u32;
     fn skip_tally(self: @T) -> u256;
     fn has_called_meeting(self: @T, seat: u32) -> bool;
