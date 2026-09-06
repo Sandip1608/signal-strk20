@@ -204,6 +204,7 @@ export function ShipMap({
             <p className={s.modalBlurb}>{active.blurb}</p>
             <Minigame
               kind={active.kind}
+              magnitude={active.magnitude}
               onSolve={() => {
                 onCompleteTask(active.id);
                 setOpenTask(null);

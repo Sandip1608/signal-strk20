@@ -14,7 +14,7 @@ import { ShipMap } from "./ship/ShipMap";
 import { CrewCard } from "./ship/Crewmate";
 import { Ejection } from "./ship/Ejection";
 import { useGame } from "@/game/store";
-import { ROOM_BY_ID, sightingsFor } from "@/game/ship";
+import { ROOM_BY_ID, sightingsFor, tasksComplete } from "@/game/ship";
 import { livingSeats, short } from "@/game/engine";
 import { type GameState, type Seat } from "@/game/types";
 import { hiddenLabel, variantByKey } from "@/game/variants";
@@ -503,32 +503,48 @@ function Witnessed({
   ship: NonNullable<ReturnType<typeof useGame.getState>["ship"]>;
   seat: number;
 }) {
-  const seen = sightingsFor(ship, seat);
+  const all = sightingsFor(ship, seat);
   const nameOf = (n: number) => game.seats.find((x) => x.seat === n)?.name ?? `Seat ${n}`;
 
   // Collapse repeats: "saw Nova in Reactor" three times is one fact.
-  const unique: { who: number; room: string }[] = [];
-  for (const sg of seen) {
-    const room = ROOM_BY_ID[sg.room].name;
-    if (!unique.some((u) => u.who === sg.who && u.room === room)) unique.push({ who: sg.who, room });
-  }
+  const collapse = (xs: typeof all) => {
+    const out: { who: number; room: string }[] = [];
+    for (const sg of xs) {
+      const room = ROOM_BY_ID[sg.room].name;
+      if (!out.some((u) => u.who === sg.who && u.room === room)) out.push({ who: sg.who, room });
+    }
+    return out;
+  };
+
+  const witnessed = collapse(all.filter((x) => !x.viaLog));
+  const fromLog = collapse(all.filter((x) => x.viaLog));
+  const finished = tasksComplete(ship, seat);
+  const phrase = (u: { who: number; room: string }) => `${nameOf(u.who)} in ${u.room}`;
 
   return (
     <div className={s.section}>
       <p className={s.note}>
         <strong>What you saw.</strong>{" "}
-        {unique.length === 0 ? (
-          "Nobody — you were alone all night. That also means nobody can vouch for you."
-        ) : (
-          <>
-            {unique
-              .slice(0, 6)
-              .map((u) => `${nameOf(u.who)} in ${u.room}`)
-              .join(" · ")}
-            .
-          </>
-        )}
+        {witnessed.length === 0
+          ? "Nobody — you were alone all night. That also means nobody can vouch for you."
+          : `${witnessed.slice(0, 6).map(phrase).join(" · ")}.`}
       </p>
+
+      {/* Finishing your task list buys evidence. It does not change who wins —
+          that is still whatever resolve_round computes from the vote. */}
+      {fromLog.length > 0 && (
+        <p className={s.note} style={{ marginTop: 8, borderColor: "#3a3560" }}>
+          <strong>Security log.</strong>{" "}
+          <span style={{ color: "#b78bff" }}>Unlocked by finishing your tasks.</span>{" "}
+          {fromLog.map(phrase).join(" · ")}. You did not see this yourself.
+        </p>
+      )}
+      {fromLog.length === 0 && !finished && (
+        <p className={s.tagline} style={{ display: "block", marginTop: 8 }}>
+          Finish your task list next round — it opens the security log and shows you movements you
+          did not witness.
+        </p>
+      )}
     </div>
   );
 }

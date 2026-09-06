@@ -17,20 +17,60 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import s from "./ship.module.css";
 import type { TaskKind } from "@/game/ship";
 
-export function Minigame({ kind, onSolve }: { kind: TaskKind; onSolve: () => void }) {
+/**
+ * `magnitude` scales the instance — wires to join, digits in the code, locks
+ * needed — so meeting a puzzle type a second time is not the identical panel.
+ */
+/**
+ * Fire `onSolve` once, after a short beat, immune to re-renders.
+ *
+ * The obvious version — `setTimeout(onSolve, 420)` inside an effect that lists
+ * `onSolve` in its deps — is broken here. Callers pass an inline arrow, so its
+ * identity changes every render; the deck re-renders constantly while bots
+ * move; the effect re-runs, its cleanup clears the pending timeout, and the
+ * `solved` guard then stops it ever being rescheduled. The puzzle shows
+ * "3 / 3 joined" and the task is never marked done.
+ *
+ * So: keep the callback in a ref, key the effect only on the completion flag,
+ * and clear the timer on unmount only.
+ */
+function useSolveOnce(done: boolean, onSolve: () => void, delay = 420) {
+  const cb = useRef(onSolve);
+  cb.current = onSolve;
+  const fired = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    if (!done || fired.current) return;
+    fired.current = true;
+    timer.current = setTimeout(() => cb.current(), delay);
+  }, [done, delay]);
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+}
+
+export function Minigame({
+  kind,
+  magnitude,
+  onSolve,
+}: {
+  kind: TaskKind;
+  magnitude: number;
+  onSolve: () => void;
+}) {
   switch (kind) {
     case "rewire":
-      return <Rewire onSolve={onSolve} />;
+      return <Rewire wires={magnitude} onSolve={onSolve} />;
     case "keypad":
-      return <Keypad onSolve={onSolve} />;
+      return <Keypad digits={magnitude} onSolve={onSolve} />;
     case "stabilize":
-      return <Stabilize onSolve={onSolve} />;
+      return <Stabilize needed={magnitude} onSolve={onSolve} />;
   }
 }
 
 // ── 1. Rewire ──────────────────────────────────────────────────────────────
 
-const WIRE_COLOURS = ["#ff4d5e", "#f5c451", "#35d9c4", "#7f8bff"];
+const WIRE_COLOURS = ["#ff4d5e", "#f5c451", "#35d9c4", "#7f8bff", "#b78bff"];
 
 function shuffle<T>(xs: T[]): T[] {
   const a = [...xs];
@@ -41,24 +81,19 @@ function shuffle<T>(xs: T[]): T[] {
   return a;
 }
 
-function Rewire({ onSolve }: { onSolve: () => void }) {
+function Rewire({ wires, onSolve }: { wires: number; onSolve: () => void }) {
+  const count = Math.max(3, Math.min(WIRE_COLOURS.length, wires));
+  const colours = WIRE_COLOURS.slice(0, count);
   // Right-hand order is shuffled once, on mount.
-  const [right] = useState(() => shuffle(WIRE_COLOURS.map((_, i) => i)));
+  const [right] = useState(() => shuffle(colours.map((_, i) => i)));
   const [picked, setPicked] = useState<number | null>(null);
   const [joined, setJoined] = useState<number[]>([]);
   const [wrong, setWrong] = useState(false);
-  const solved = useRef(false);
 
   const ROW_H = 46;
-  const H = WIRE_COLOURS.length * ROW_H;
+  const H = count * ROW_H;
 
-  useEffect(() => {
-    if (joined.length === WIRE_COLOURS.length && !solved.current) {
-      solved.current = true;
-      const id = setTimeout(onSolve, 420);
-      return () => clearTimeout(id);
-    }
-  }, [joined, onSolve]);
+  useSolveOnce(joined.length === count, onSolve);
 
   const tapRight = (rightIdx: number) => {
     if (picked === null) return;
@@ -90,14 +125,14 @@ function Rewire({ onSolve }: { onSolve: () => void }) {
               y1={li * ROW_H + ROW_H / 2}
               x2={246}
               y2={ri * ROW_H + ROW_H / 2}
-              stroke={WIRE_COLOURS[colour]}
+              stroke={colours[colour]}
               strokeWidth={5}
               strokeLinecap="round"
             />
           );
         })}
 
-        {WIRE_COLOURS.map((c, i) => {
+        {colours.map((c, i) => {
           const done = joined.includes(i);
           return (
             <g key={`l${i}`}>
@@ -131,7 +166,7 @@ function Rewire({ onSolve }: { onSolve: () => void }) {
               width={46}
               height={28}
               rx={6}
-              fill={WIRE_COLOURS[colour]}
+              fill={colours[colour]}
               opacity={done ? 1 : 0.75}
               stroke={picked !== null && !done ? "#ffffff66" : "transparent"}
               strokeWidth={2}
@@ -142,7 +177,7 @@ function Rewire({ onSolve }: { onSolve: () => void }) {
         })}
       </svg>
       <p className={s.gameCount}>
-        {joined.length} / {WIRE_COLOURS.length} joined
+        {joined.length} / {count} joined
       </p>
     </div>
   );
@@ -150,29 +185,28 @@ function Rewire({ onSolve }: { onSolve: () => void }) {
 
 // ── 2. Keypad ──────────────────────────────────────────────────────────────
 
-function Keypad({ onSolve }: { onSolve: () => void }) {
+function Keypad({ digits, onSolve }: { digits: number; onSolve: () => void }) {
+  const len = Math.max(3, Math.min(8, digits));
   const [code] = useState(() =>
-    Array.from({ length: 4 }, () => Math.floor(Math.random() * 10)).join(""),
+    Array.from({ length: len }, () => Math.floor(Math.random() * 10)).join(""),
   );
   const [entered, setEntered] = useState("");
   const [wrong, setWrong] = useState(false);
-  const solved = useRef(false);
 
+  const correct = entered.length === code.length && entered === code;
+  useSolveOnce(correct, onSolve, 380);
+
+  // A wrong code clears itself; this timer is safe to re-run since it only
+  // resets local state.
   useEffect(() => {
-    if (entered.length < code.length) return;
-    if (entered === code) {
-      if (solved.current) return;
-      solved.current = true;
-      const id = setTimeout(onSolve, 380);
-      return () => clearTimeout(id);
-    }
+    if (entered.length < code.length || correct) return;
     setWrong(true);
     const id = setTimeout(() => {
       setEntered("");
       setWrong(false);
     }, 500);
     return () => clearTimeout(id);
-  }, [entered, code, onSolve]);
+  }, [entered, code, correct]);
 
   return (
     <div className={s.game}>
@@ -205,9 +239,10 @@ function Keypad({ onSolve }: { onSolve: () => void }) {
 
 // ── 3. Stabilize ───────────────────────────────────────────────────────────
 
-const NEEDED = 3;
-
-function Stabilize({ onSolve }: { onSolve: () => void }) {
+function Stabilize({ needed, onSolve }: { needed: number; onSolve: () => void }) {
+  const NEEDED = Math.max(2, Math.min(5, needed));
+  const onSolveRef = useRef(onSolve);
+  onSolveRef.current = onSolve;
   const [pos, setPos] = useState(0); // 0..1 across the track
   const [hits, setHits] = useState(0);
   const [flash, setFlash] = useState<"hit" | "miss" | null>(null);
@@ -215,14 +250,15 @@ function Stabilize({ onSolve }: { onSolve: () => void }) {
   const raf = useRef<number | undefined>(undefined);
   const solved = useRef(false);
 
-  // Band shrinks as you go, so the third one takes actual attention.
-  const half = 0.13 - hits * 0.028;
+  // Band shrinks as you go, so the last one takes actual attention. Scaled by
+  // the total so a 4-lock task does not become impossible at the end.
+  const half = 0.14 - (hits * 0.075) / NEEDED;
   const lo = 0.5 - half;
   const hi = 0.5 + half;
 
   useEffect(() => {
     let last = performance.now();
-    const speed = 0.00075 + hits * 0.00018;
+    const speed = 0.00075 + (hits * 0.0006) / NEEDED;
 
     const tick = (t: number) => {
       const dt = t - last;
@@ -256,13 +292,15 @@ function Stabilize({ onSolve }: { onSolve: () => void }) {
       if (next >= NEEDED) {
         solved.current = true;
         if (raf.current !== undefined) cancelAnimationFrame(raf.current);
-        setTimeout(onSolve, 420);
+        // Fired from an event handler, not an effect, so no cleanup can cancel
+        // it - but read through a ref for the same reason the others do.
+        setTimeout(() => onSolveRef.current(), 420);
       }
     } else {
       setFlash("miss");
     }
     setTimeout(() => setFlash(null), 300);
-  }, [pos, lo, hi, hits, onSolve]);
+  }, [pos, lo, hi, hits, NEEDED, onSolve]);
 
   return (
     <div className={s.game}>

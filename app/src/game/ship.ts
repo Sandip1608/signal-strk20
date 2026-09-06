@@ -110,24 +110,22 @@ export type TaskDef = {
   blurb: string;
 };
 
+/**
+ * One task per room, two rooms per puzzle type.
+ *
+ * The shape matters: with three types and two rooms each, a player can always
+ * be dealt one of *every* type in three different rooms. The previous list had
+ * five defs drawn at random, which measured out at a repeated puzzle type in
+ * 60% of rounds — you would play the same wiring panel twice and the round felt
+ * thin. It also left the Cafeteria with no task, so a sixth of the deck was
+ * somewhere you never had a reason to walk.
+ */
 export const TASK_DEFS: TaskDef[] = [
   {
     kind: "rewire",
     room: "electrical",
     label: "Fix wiring",
     blurb: "Join each wire to the matching colour.",
-  },
-  {
-    kind: "keypad",
-    room: "weapons",
-    label: "Enter access code",
-    blurb: "Key in the code on the panel.",
-  },
-  {
-    kind: "stabilize",
-    room: "reactor",
-    label: "Stabilise reactor",
-    blurb: "Stop the needle inside the green band, three times.",
   },
   {
     kind: "rewire",
@@ -137,11 +135,31 @@ export const TASK_DEFS: TaskDef[] = [
   },
   {
     kind: "keypad",
+    room: "weapons",
+    label: "Enter access code",
+    blurb: "Key in the code on the panel.",
+  },
+  {
+    kind: "keypad",
     room: "medbay",
     label: "Log medical scan",
     blurb: "Key in the code on the panel.",
   },
+  {
+    kind: "stabilize",
+    room: "reactor",
+    label: "Stabilise reactor",
+    blurb: "Hold the needle inside the band.",
+  },
+  {
+    kind: "stabilize",
+    room: "cafeteria",
+    label: "Tune the comms array",
+    blurb: "Hold the needle inside the band.",
+  },
 ];
+
+export const TASK_KINDS: TaskKind[] = ["rewire", "keypad", "stabilize"];
 
 export type TaskInstance = {
   /** Unique per seat, so two seats can hold the "same" task. */
@@ -150,6 +168,12 @@ export type TaskInstance = {
   room: RoomId;
   label: string;
   blurb: string;
+  /**
+   * How hard this particular instance is — 3 wires or 5, a 4-digit code or a
+   * 6-digit one, two gauge locks or four. Rolled per task so the second time
+   * you meet a puzzle type it is not the identical panel.
+   */
+  magnitude: number;
   done: boolean;
 };
 
@@ -159,6 +183,11 @@ export type Sighting = {
   observer: number;
   who: number;
   room: RoomId;
+  /**
+   * Came from the security log rather than the observer's own eyes — the
+   * reward for finishing a task list. See `grantSecurityLog`.
+   */
+  viaLog?: boolean;
 };
 
 export type ShipState = {
@@ -170,6 +199,26 @@ export type ShipState = {
 };
 
 const TASKS_PER_PLAYER = 3;
+
+/**
+ * Difficulty for one task instance.
+ *
+ * Ranges are chosen so the hardest instance is still a few seconds of work —
+ * a task is meant to hold your attention while somebody could walk in, not to
+ * become a puzzle game.
+ */
+function rollMagnitude(kind: TaskKind): number {
+  const range: Record<TaskKind, [number, number]> = {
+    rewire: [3, 5], // wires to join
+    keypad: [4, 6], // digits in the code
+    stabilize: [2, 4], // locks needed
+  };
+  const [lo, hi] = range[kind];
+  return lo + Math.floor(Math.random() * (hi - lo + 1));
+}
+
+/** How many extra log entries finishing your whole list is worth. */
+const SECURITY_LOG_ENTRIES = 2;
 
 function shuffled<T>(xs: T[]): T[] {
   const a = [...xs];
@@ -191,9 +240,20 @@ export function initShip(seats: number[], now = Date.now()): ShipState {
   const tasks: Record<number, TaskInstance[]> = {};
 
   for (const seat of seats) {
-    tasks[seat] = shuffled(TASK_DEFS)
+    // One task of each kind, in a randomly chosen room for that kind: three
+    // different puzzles in three different rooms, every time.
+    tasks[seat] = shuffled(TASK_KINDS)
       .slice(0, TASKS_PER_PLAYER)
-      .map((d, i) => ({ ...d, id: `${seat}:${d.kind}:${d.room}:${i}`, done: false }));
+      .map((kind, i) => {
+        const options = TASK_DEFS.filter((d) => d.kind === kind);
+        const def = options[Math.floor(Math.random() * options.length)];
+        return {
+          ...def,
+          id: `${seat}:${def.kind}:${def.room}:${i}`,
+          magnitude: rollMagnitude(kind),
+          done: false,
+        };
+      });
   }
 
   // You can obviously see whoever you started next to, so record it. Without
@@ -246,13 +306,61 @@ export function move(
 }
 
 export function completeTask(ship: ShipState, seat: number, taskId: string): ShipState {
-  return {
-    ...ship,
-    tasks: {
-      ...ship.tasks,
-      [seat]: (ship.tasks[seat] ?? []).map((t) => (t.id === taskId ? { ...t, done: true } : t)),
-    },
-  };
+  const mine = (ship.tasks[seat] ?? []).map((t) =>
+    t.id === taskId ? { ...t, done: true } : t,
+  );
+  const next: ShipState = { ...ship, tasks: { ...ship.tasks, [seat]: mine } };
+
+  // Finishing your whole list opens the security log.
+  const wasIncomplete = (ship.tasks[seat] ?? []).some((t) => !t.done);
+  if (wasIncomplete && mine.every((t) => t.done)) {
+    return grantSecurityLog(next, seat);
+  }
+  return next;
+}
+
+/**
+ * Reward for finishing a task list: a couple of movements you did not witness
+ * yourself.
+ *
+ * This is what stops tasks being busywork. It deliberately does **not** touch
+ * the win condition — the round is still decided by whatever `resolve_round`
+ * computes from the vote, and a second win condition would put the UI and the
+ * contract into disagreement. What finishing your tasks buys is *evidence*,
+ * which is the currency the vote actually runs on.
+ *
+ * Entries are marked `viaLog` so the ballot can show them as hearsay from the
+ * logs rather than something you saw with your own eyes.
+ */
+export function grantSecurityLog(ship: ShipState, seat: number): ShipState {
+  const alreadyKnown = new Set(
+    ship.sightings
+      .filter((s) => s.observer === seat)
+      .map((s) => `${s.who}:${s.room}`),
+  );
+
+  const candidates = ship.sightings.filter(
+    (s) => s.observer !== seat && s.who !== seat && !alreadyKnown.has(`${s.who}:${s.room}`),
+  );
+
+  // Newest first, de-duplicated by who-and-where.
+  const picked: Sighting[] = [];
+  const seen = new Set<string>();
+  for (let i = candidates.length - 1; i >= 0 && picked.length < SECURITY_LOG_ENTRIES; i -= 1) {
+    const c = candidates[i];
+    const key = `${c.who}:${c.room}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    picked.push({ ...c, observer: seat, viaLog: true });
+  }
+
+  return picked.length === 0 ? ship : { ...ship, sightings: [...ship.sightings, ...picked] };
+}
+
+/** Whether this seat has finished everything it was dealt. */
+export function tasksComplete(ship: ShipState, seat: number): boolean {
+  const mine = ship.tasks[seat] ?? [];
+  return mine.length > 0 && mine.every((t) => t.done);
 }
 
 /** The task at this seat's current room that is still outstanding. */

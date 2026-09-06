@@ -261,6 +261,31 @@ task list, and three hand-rolled minigames — wire matching, a keypad, and
 a timing gauge. No canvas, no game library; the only per-frame animation is
 the gauge needle inside its own modal.
 
+**Tasks are three distinct puzzles, scaled per instance.** The first version
+drew 3 of 5 task defs at random, where `rewire` and `keypad` each appeared
+twice: measured over 20k draws that repeated a puzzle type in **60% of
+rounds**, and left the Cafeteria with no task at all. Now there is one def per
+room, two rooms per kind, and the draw picks one def *per kind* — 100% distinct
+types in 3 distinct rooms, all six rooms used. Each instance also rolls a
+`magnitude` (3-5 wires, 4-6 digits, 2-4 gauge locks) so meeting a type twice is
+not the identical panel.
+
+**Finishing your task list unlocks the security log** (`grantSecurityLog`):
+two movements you did not witness, marked `viaLog` and shown separately on the
+ballot as hearsay. This is what stops tasks being busywork — it buys *evidence*,
+the currency the vote runs on. It deliberately does **not** touch the win
+condition; that is still whatever `resolve_round` computes, and a second win
+condition would put the UI and the contract into disagreement.
+
+**Minigame completion must not depend on `onSolve`'s identity.** Callers pass
+an inline arrow, so it changes every render, and the deck re-renders constantly
+while bots move. The original `useEffect(() => setTimeout(onSolve, 420), [...,
+onSolve])` had its cleanup cancel the pending timer on every re-render, while a
+`solved` ref stopped it rescheduling — the panel showed "3 / 3 joined" and the
+task was never marked done. `useSolveOnce` holds the callback in a ref, keys
+only on the completion flag, and clears the timer on unmount only. Do not
+re-introduce the callback into those deps.
+
 **Players spawn scattered, not all in one room.** With a shared spawn every
 early sighting was "everyone in the Cafeteria" — true, but worthless as
 evidence, because seeing someone tells you nothing if you saw everyone.
