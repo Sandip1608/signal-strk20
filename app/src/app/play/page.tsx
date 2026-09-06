@@ -162,11 +162,16 @@ function bannerText(game: GameState) {
     case Phase.ASSIGNED:
       return <>Roles committed on-chain. Each player opens their encrypted note.</>;
     case Phase.NIGHT:
-      return <>The impostor is choosing a target, privately.</>;
+      return (
+        <>
+          Round <strong>{game.roundNumber + 1}</strong> — the impostor is choosing a target,
+          privately.
+        </>
+      );
     case Phase.VOTE:
       return (
         <>
-          <strong>{String(game.totalVotes)}</strong> anonymous vote
+          Round <strong>{game.roundNumber + 1}</strong> · {String(game.totalVotes)} anonymous vote
           {game.totalVotes === 1n ? "" : "s"} counted
         </>
       );

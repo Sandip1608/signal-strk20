@@ -67,6 +67,7 @@ type Store = {
   kill: (victimSeat: number) => void;
   report: (seat: number) => void;
   skipNight: () => void;
+  endVote: () => void;
   callMeeting: (seat: number) => void;
   useVent: (seat: number) => void;
   sabotageLights: () => void;
@@ -272,6 +273,21 @@ export const useGame = create<Store>((set, get) => ({
       return;
     }
     apply(set, (g) => engine.skipNight(g));
+  },
+
+  /** Close this round and start the next night. */
+  endVote: () => {
+    if (get().mode === "online") {
+      void get().send({ type: "endVote" });
+      return;
+    }
+    apply(set, (g) => engine.endVote(g));
+    const g = get().game;
+    set((st) =>
+      st.ship && g
+        ? { ship: ship.resetForRound(st.ship, g.seats.map((x) => x.seat)) }
+        : {},
+    );
   },
 
   callMeeting: (seat) => {

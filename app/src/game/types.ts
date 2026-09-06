@@ -121,7 +121,11 @@ export type GameState = {
   nightDeadline: number;
   voteDeadline: number;
 
-  /** `seat + 1`; 0 = nobody died. */
+  /** Which round we are in, from 0. */
+  roundNumber: number;
+  /** round -> `seat + 1` ejected that round; 0 = nobody. */
+  ejections: Record<number, number>;
+  /** `seat + 1`; 0 = nobody died this round. */
   nightVictim: number;
   /**
    * `seat + 1` of a player who has been sent the kill note but has not yet
@@ -164,6 +168,9 @@ export type LogEntry = {
  * anonymous leg rather than a second entrypoint.
  */
 export const SKIP_VOTE = 0xffffffff;
+
+/** `round.cairo::MAX_ROUNDS` - the stall cap on the host-driven loop. */
+export const MAX_ROUNDS = 10;
 
 /** The buy-in / vote weight unit. One seat, one vote of equal weight in v1. */
 export const VOTE_WEIGHT = 1n;

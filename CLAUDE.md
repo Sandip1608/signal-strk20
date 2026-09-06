@@ -261,6 +261,29 @@ task list, and three hand-rolled minigames — wire matching, a keypad, and
 a timing gauge. No canvas, no game library; the only per-frame animation is
 the gauge needle inside its own modal.
 
+**Multi-round works by host-declares / contract-verifies.** The contract
+cannot evaluate a win condition mid-game: that needs the roles, and they stay
+sealed until the reveal. So the host chooses — `end_vote()` to play on,
+`resolve_round()` to finish — and `resolve_round` then *verifies* the choice
+was honest by deriving the team, counting who is alive and asserting
+`impostors == 0 || impostors >= crew`. Ending early is rejected with
+`game not over` (verified: 1 impostor vs 4 crew, resolve refused, `end_vote`
+accepted). `MAX_ROUNDS = 10` caps a host who simply never resolves.
+
+Two alternatives were considered and rejected: per-seat role commitments (would
+allow Confirm Ejects mid-game, but costs the single clean reveal and lets a
+host lie unless each opening is re-checked against the seed), and trusting the
+host outright. **Consequence worth knowing: Confirm Ejects cannot be honoured
+across rounds** — saying "they were an impostor" would mean opening the
+commitment early.
+
+**Per-round contract state is namespaced, not cleared.** A Cairo `Map` has no
+clear, so `tallies` is keyed `(round, seat)` and `skip_tally`/`total_votes`/
+`night_victim` by round; advancing `round_number` *is* the reset. Deaths and
+used emergency meetings deliberately carry over — one meeting per player per
+game, as in Among Us. Client-side `resetForRound` re-spawns everyone, wipes
+sightings and re-arms the cooldown, but **keeps task progress**.
+
 **Among Us rules now implemented.** Skip vote (`SKIP_VOTE` sentinel — an
 abstention is an ordinary anonymous leg naming nobody, so the escrow needs no
 second entrypoint; a skip that *matches or beats* the top accusation ejects

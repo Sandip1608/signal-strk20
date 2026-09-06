@@ -14,6 +14,7 @@
 import {
   CEIL_PLAYERS,
   FLOOR_PLAYERS,
+  MAX_ROUNDS,
   NO_SEAT,
   SKIP_VOTE,
   Phase,
@@ -83,6 +84,8 @@ export function createGame(opts: {
     voteDurationSecs: opts.voteDurationSecs,
     nightDeadline: 0,
     voteDeadline: 0,
+    roundNumber: 0,
+    ejections: {},
     nightVictim: NO_SEAT,
     pendingVictim: NO_SEAT,
     tallies: {},
@@ -382,6 +385,55 @@ export function computeEjected(state: GameState): number {
  * so it has no crypto dependency); it must equal what was posted.
  */
 /**
+ * `end_vote()` - close this round's vote and open the next night.
+ *
+ * The contract cannot tell whether the game is over: that needs the roles, and
+ * they stay sealed until the reveal. So the host chooses - end the vote to
+ * play on, or resolve to finish - and `resolveRound` then verifies the choice
+ * was honest. `MAX_ROUNDS` stops a host stalling forever.
+ *
+ * Deaths and used emergency meetings deliberately carry across the boundary;
+ * everything else about the round is rebuilt.
+ */
+export function endVote(state: GameState, now = Date.now()): GameState {
+  require_(state.phase === Phase.VOTE, "not in vote phase");
+  require_(now > state.voteDeadline, "vote still open");
+  require_(state.roundNumber + 1 < MAX_ROUNDS, "too many rounds");
+
+  const ejected = computeEjected(state);
+  const seats = state.seats.map((x) => ({
+    ...x,
+    dead: x.dead || (ejected !== NO_SEAT && x.seat === ejected - 1),
+    hasVoted: false,
+  }));
+
+  const round = state.roundNumber;
+  return log(
+    {
+      ...state,
+      seats,
+      ejections: { ...state.ejections, [round]: ejected },
+      roundNumber: round + 1,
+      tallies: {},
+      skipTally: 0n,
+      totalVotes: 0n,
+      nightVictim: NO_SEAT,
+      pendingVictim: NO_SEAT,
+      phase: Phase.NIGHT,
+      nightDeadline: now + state.nightDurationSecs * 1000,
+      voteDeadline: 0,
+    },
+    {
+      call: "end_vote",
+      text:
+        ejected === NO_SEAT
+          ? `Round ${round + 1} ended with nobody ejected. Night falls again.`
+          : `${seats[ejected - 1].name} was ejected. Night falls again.`,
+    },
+  );
+}
+
+/**
  * Mirrors `resolve_round`. The caller does the hashing (this module stays free
  * of crypto dependencies) but every check the contract makes is made here, in
  * the same order and with the same messages.
@@ -408,13 +460,30 @@ export function resolveRound(
 
   const hidden = new Set(p.hiddenSeats);
   const ejected = computeEjected(state);
-  // Crew win by ejecting anyone from the hidden team.
-  const crewWon = ejected !== NO_SEAT && hidden.has(ejected - 1);
+
+  // Apply this round's ejection, then count who is left and check the host was
+  // entitled to stop here - otherwise they could end the game on whichever
+  // round happened to suit them.
+  const afterSeats = state.seats.map((x) => ({
+    ...x,
+    dead: x.dead || (ejected !== NO_SEAT && x.seat === ejected - 1),
+  }));
+  let impostorsAlive = 0;
+  let crewAlive = 0;
+  for (const x of afterSeats) {
+    if (x.dead) continue;
+    if (hidden.has(x.seat)) impostorsAlive += 1;
+    else crewAlive += 1;
+  }
+  const crewWon = impostorsAlive === 0;
+  require_(crewWon || impostorsAlive >= crewAlive, "game not over");
 
   return log(
     {
       ...state,
+      seats: afterSeats,
       ejected,
+      ejections: { ...state.ejections, [state.roundNumber]: ejected },
       impostorRevealed: Math.min(...p.hiddenSeats) + 1,
       hiddenSeats: [...p.hiddenSeats].sort((a, b) => a - b),
       hostSeed: p.hostSeed,

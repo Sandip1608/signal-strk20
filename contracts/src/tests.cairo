@@ -141,6 +141,67 @@ mod tests {
         assert(!ejects(0, false, 0), 'no votes should eject nobody');
     }
 
+    // ── multi-round ending ────────────────────────────────────────────────
+
+    /// Mirrors the assert in `resolve_round`. The host picks when to stop, so
+    /// this is the check that makes that choice honest rather than trusted -
+    /// getting it wrong would let a host end on whichever round suited them.
+    fn game_over(impostors_alive: u32, crew_alive: u32) -> bool {
+        impostors_alive == 0 || impostors_alive >= crew_alive
+    }
+    fn crew_won(impostors_alive: u32) -> bool {
+        impostors_alive == 0
+    }
+
+    #[test]
+    fn all_impostors_gone_is_a_crew_win() {
+        assert(game_over(0, 3), 'should be over');
+        assert(crew_won(0), 'crew should win');
+    }
+
+    #[test]
+    fn impostors_equalling_crew_ends_it() {
+        // 1 impostor vs 1 crew: the impostor cannot be out-voted, so Among Us
+        // stops here rather than playing a decided round.
+        assert(game_over(1, 1), 'should be over');
+        assert(!crew_won(1), 'impostor should win');
+    }
+
+    #[test]
+    fn impostors_outnumbering_crew_ends_it() {
+        assert(game_over(2, 1), 'should be over');
+        assert(!crew_won(2), 'impostor should win');
+    }
+
+    #[test]
+    fn a_live_impostor_among_many_crew_is_not_over() {
+        assert(!game_over(1, 4), 'should keep playing');
+    }
+
+    #[test]
+    fn two_impostors_among_three_crew_is_not_over() {
+        assert(!game_over(2, 3), 'should keep playing');
+    }
+
+    /// The opening table must never already satisfy the end condition, or the
+    /// host could resolve on round 0. This is exactly what the constructor's
+    /// `2 * hidden < min_players` assert buys.
+    #[test]
+    fn a_legal_opening_table_is_never_already_over() {
+        // 1 impostor, 5 players
+        assert(!game_over(1, 4), 'k=1 n=5 already over');
+        // 2 impostors, 5 players
+        assert(!game_over(2, 3), 'k=2 n=5 already over');
+        // 3 impostors, 7 players
+        assert(!game_over(3, 4), 'k=3 n=7 already over');
+    }
+
+    #[test]
+    fn round_cap_is_sane() {
+        assert(signal::round::MAX_ROUNDS > 1, 'cap must allow a loop');
+        assert(signal::round::MAX_ROUNDS <= 20, 'cap should bound a stall');
+    }
+
     // ── cross-language parity ─────────────────────────────────────────────
 
     /// These exact seat lists were produced by the TypeScript mirror in

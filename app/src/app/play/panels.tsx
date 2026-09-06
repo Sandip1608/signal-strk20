@@ -377,7 +377,8 @@ export function NightPanel({ game }: { game: GameState }) {
 // ── Vote ───────────────────────────────────────────────────────────────────
 
 export function VotePanel({ game }: { game: GameState }) {
-  const { viewerSeat, revealed, setViewer, reveal, cover, vote, resolve, ship, mode } = useGame();
+  const { viewerSeat, revealed, setViewer, reveal, cover, vote, resolve, ship, mode, endVote } =
+    useGame();
   const online = mode === "online";
   const voteClosed = useDeadline(game.voteDeadline);
 
@@ -494,6 +495,14 @@ export function VotePanel({ game }: { game: GameState }) {
       </div>
 
       <div className={s.btnRow}>
+        <button
+          type="button"
+          className={`${s.btn} ${s.btnGhost}`}
+          onClick={endVote}
+          disabled={!voteClosed.passed}
+        >
+          {voteClosed.passed ? "Next round (host)" : `Next round in ${voteClosed.secondsLeft}s`}
+        </button>
         <button type="button" className={s.btn} onClick={resolve} disabled={!voteClosed.passed}>
           {voteClosed.passed
             ? "Reveal & resolve (host)"
@@ -506,7 +515,7 @@ export function VotePanel({ game }: { game: GameState }) {
               toVote.length > 0
               ? `${toVote.length} still to vote — the ballot stays open either way`
               : "All votes in — the ballot still has to run its clock"
-            : "The ballot is closed. Open the commitment."}
+            : "Ballot closed. Play on, or open the commitment to finish — resolving before the game is actually over is rejected."}
         </span>
       </div>
     </div>

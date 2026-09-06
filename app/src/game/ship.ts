@@ -373,6 +373,29 @@ export function vent(ship: ShipState, seat: number, now = Date.now()): ShipState
   return { ...ship, positions: { ...ship.positions, [seat]: to } };
 }
 
+/**
+ * Reset the deck for a new round.
+ *
+ * Everyone re-spawns, the evidence trail is wiped and the impostor's cooldown
+ * is re-armed — but **task progress carries over**, which is the whole point
+ * of tasks spanning rounds. Sightings are cleared deliberately: evidence from
+ * two rounds ago is not what a table argues about, and keeping it would make
+ * the ballot unreadable.
+ */
+export function resetForRound(
+  ship: ShipState,
+  seats: number[],
+  now = Date.now(),
+): ShipState {
+  return {
+    ...ship,
+    positions: spawnRooms(seats),
+    sightings: [],
+    killReadyAt: now + KILL_COOLDOWN_SECS * 1000,
+    lightsOutUntil: 0,
+  };
+}
+
 /** Everyone (living) currently standing in `room`. */
 export function occupants(ship: ShipState, room: RoomId, living: number[]): number[] {
   return living.filter((seat) => ship.positions[seat] === room);

@@ -110,6 +110,14 @@ pub const NO_SEAT: u32 = 0;
 /// a skip is an ordinary vote that happens to name nobody.
 pub const SKIP_VOTE: u32 = 0xffffffff;
 
+/// Hard cap on rounds.
+///
+/// The host decides when the game is over (the contract cannot check a win
+/// condition without learning the roles, which is the whole point of the
+/// commitment). `resolve_round` verifies that call was honest — but nothing
+/// stops a host simply never calling it, so the loop needs a ceiling.
+pub const MAX_ROUNDS: u32 = 10;
+
 #[starknet::contract]
 pub mod SignalRound {
     use core::num::traits::Zero;
@@ -158,13 +166,19 @@ pub mod SignalRound {
         night_duration: u64,
         night_deadline: u64,
         dead: Map<u32, bool>,
-        night_victim: u32, // seat + 1, 0 = nobody died
+        // -- rounds --
+        // Per-round values are namespaced by round rather than cleared: a Cairo
+        // Map has no "clear", so the alternative would be walking every seat on
+        // each boundary.
+        round_number: u32,
+        night_victim_of: Map<u32, u32>, // round -> seat + 1, 0 = nobody died
+        ejection_of: Map<u32, u32>, // round -> seat + 1, 0 = nobody ejected
         // -- vote --
         vote_duration: u64,
         vote_deadline: u64,
-        tallies: Map<u32, u256>,
-        skip_tally: u256,
-        total_votes: u256,
+        tallies: Map<(u32, u32), u256>, // (round, seat) -> weight
+        skip_tally_of: Map<u32, u256>, // round -> weight
+        total_votes_of: Map<u32, u256>, // round -> weight
         // -- emergency meetings --
         called_meeting: Map<u32, bool>, // seat -> has already called one
         // -- resolution --
@@ -183,6 +197,7 @@ pub mod SignalRound {
         BodyReported: BodyReported,
         NightSkipped: NightSkipped,
         MeetingCalled: MeetingCalled,
+        RoundEnded: RoundEnded,
         VoteRecorded: VoteRecorded,
         RoundResolved: RoundResolved,
     }
@@ -214,6 +229,13 @@ pub mod SignalRound {
     #[derive(Drop, starknet::Event)]
     struct NightSkipped {
         vote_deadline: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct RoundEnded {
+        round: u32,
+        ejected_seat_plus_one: u32,
+        next_night_deadline: u64,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -284,19 +306,21 @@ pub mod SignalRound {
 
             // A skip is an ordinary anonymous leg that names nobody, so the
             // escrow path is identical and the tally stays publicly computable.
+            let round = self.round_number.read();
+
             if candidate_seat == super::SKIP_VOTE {
-                let new_tally = self.skip_tally.read() + amount;
-                self.skip_tally.write(new_tally);
-                self.total_votes.write(self.total_votes.read() + amount);
+                let new_tally = self.skip_tally_of.read(round) + amount;
+                self.skip_tally_of.write(round, new_tally);
+                self.total_votes_of.write(round, self.total_votes_of.read(round) + amount);
                 self.emit(VoteRecorded { candidate_seat, amount, new_tally });
                 return;
             }
 
             assert(candidate_seat < self.player_count.read(), 'bad candidate');
             assert(!self.dead.read(candidate_seat), 'candidate dead');
-            let new_tally = self.tallies.read(candidate_seat) + amount;
-            self.tallies.write(candidate_seat, new_tally);
-            self.total_votes.write(self.total_votes.read() + amount);
+            let new_tally = self.tallies.read((round, candidate_seat)) + amount;
+            self.tallies.write((round, candidate_seat), new_tally);
+            self.total_votes_of.write(round, self.total_votes_of.read(round) + amount);
             self.emit(VoteRecorded { candidate_seat, amount, new_tally });
         }
 
@@ -331,7 +355,7 @@ pub mod SignalRound {
         }
 
         fn tally(self: @ContractState, seat: u32) -> u256 {
-            self.tallies.read(seat)
+            self.tallies.read((self.round_number.read(), seat))
         }
 
         /// Returns seat + 1; 0 means tie / nobody ejected.
@@ -421,7 +445,7 @@ pub mod SignalRound {
             let seat = self.seat_of_session_key(get_caller_address());
             assert(!self.dead.read(seat), 'already dead');
             self.dead.write(seat, true);
-            self.night_victim.write(seat + 1);
+            self.night_victim_of.write(self.round_number.read(), seat + 1);
             self.open_vote();
             self.emit(BodyReported { victim_seat: seat, vote_deadline: self.vote_deadline.read() });
         }
@@ -456,6 +480,41 @@ pub mod SignalRound {
             assert(get_block_timestamp() > self.night_deadline.read(), 'night not over');
             self.open_vote();
             self.emit(NightSkipped { vote_deadline: self.vote_deadline.read() });
+        }
+
+        /// Close this round's vote and open the next night.
+        ///
+        /// The contract cannot tell whether the game is over — that needs the
+        /// roles, which stay sealed until `resolve_round`. So the host chooses:
+        /// `end_vote` to play on, `resolve_round` to finish. `resolve_round`
+        /// then *verifies* that choice was honest, and `MAX_ROUNDS` stops a
+        /// host stalling forever.
+        fn end_vote(ref self: ContractState) {
+            self.assert_host();
+            assert(self.phase.read() == phases::VOTE, 'not in vote phase');
+            assert(get_block_timestamp() > self.vote_deadline.read(), 'vote still open');
+
+            let round = self.round_number.read();
+            assert(round + 1 < super::MAX_ROUNDS, 'too many rounds');
+
+            let ejected = self.compute_ejected();
+            self.ejection_of.write(round, ejected);
+            if ejected != super::NO_SEAT {
+                self.dead.write(ejected - 1, true);
+            }
+
+            // Per-round buckets are namespaced, so advancing the counter *is*
+            // the reset. Deaths and used meetings deliberately carry over.
+            self.round_number.write(round + 1);
+            let deadline = get_block_timestamp() + self.night_duration.read();
+            self.night_deadline.write(deadline);
+            self.phase.write(phases::NIGHT);
+            self
+                .emit(
+                    RoundEnded {
+                        round, ejected_seat_plus_one: ejected, next_night_deadline: deadline,
+                    },
+                );
         }
 
         /// After the vote deadline the host reveals the impostor by opening
@@ -526,9 +585,35 @@ pub mod SignalRound {
                 j += 1;
             }
 
+            let round = self.round_number.read();
             let ejected = self.compute_ejected();
-            // Crew win by ejecting anyone from the hidden team.
-            let crew_won = ejected != super::NO_SEAT && self.hidden.read(ejected - 1);
+            self.ejection_of.write(round, ejected);
+            if ejected != super::NO_SEAT {
+                self.dead.write(ejected - 1, true);
+            }
+
+            // Now the roles are open, count who is left and check the host was
+            // entitled to stop here. Without this the host could end the game
+            // on whichever round happened to suit them.
+            let n = self.player_count.read();
+            let mut impostors_alive: u32 = 0;
+            let mut crew_alive: u32 = 0;
+            let mut seat: u32 = 0;
+            while seat != n {
+                if !self.dead.read(seat) {
+                    if self.hidden.read(seat) {
+                        impostors_alive += 1;
+                    } else {
+                        crew_alive += 1;
+                    }
+                }
+                seat += 1;
+            }
+
+            let crew_won = impostors_alive == 0;
+            let impostors_won = impostors_alive >= crew_alive;
+            assert(crew_won || impostors_won, 'game not over');
+
             self.ejected.write(ejected);
             self.impostor.write(*hidden_seats.at(0) + 1);
             self.crew_won.write(crew_won);
@@ -566,7 +651,7 @@ pub mod SignalRound {
         }
 
         fn night_victim(self: @ContractState) -> u32 {
-            self.night_victim.read()
+            self.night_victim_of.read(self.round_number.read())
         }
 
         fn role_commitment(self: @ContractState) -> felt252 {
@@ -574,11 +659,20 @@ pub mod SignalRound {
         }
 
         fn total_votes(self: @ContractState) -> u256 {
-            self.total_votes.read()
+            self.total_votes_of.read(self.round_number.read())
         }
 
         fn skip_tally(self: @ContractState) -> u256 {
-            self.skip_tally.read()
+            self.skip_tally_of.read(self.round_number.read())
+        }
+
+        fn round_number(self: @ContractState) -> u32 {
+            self.round_number.read()
+        }
+
+        /// `seat + 1` ejected in `round`; 0 = nobody.
+        fn ejection_in(self: @ContractState, round: u32) -> u32 {
+            self.ejection_of.read(round)
         }
 
         fn has_called_meeting(self: @ContractState, seat: u32) -> bool {
@@ -652,13 +746,14 @@ pub mod SignalRound {
         /// a tie for first / all-zero tallies.
         fn compute_ejected(self: @ContractState) -> u32 {
             let n = self.player_count.read();
+            let round = self.round_number.read();
             let mut best_seat_plus_one: u32 = 0;
             let mut best: u256 = 0;
             let mut tied = false;
             let mut seat: u32 = 0;
             while seat != n {
                 if !self.dead.read(seat) {
-                    let t = self.tallies.read(seat);
+                    let t = self.tallies.read((round, seat));
                     if t > best {
                         best = t;
                         best_seat_plus_one = seat + 1;
@@ -672,7 +767,7 @@ pub mod SignalRound {
             // A skip that matches or beats the leading accusation ejects
             // nobody - the table declined. Ties between players eject nobody
             // either.
-            if tied || best == 0 || self.skip_tally.read() >= best {
+            if tied || best == 0 || self.skip_tally_of.read(round) >= best {
                 0
             } else {
                 best_seat_plus_one
@@ -697,6 +792,7 @@ pub trait ISignalRoundGame<T> {
     fn report_night_kill(ref self: T);
     fn skip_night(ref self: T);
     fn call_meeting(ref self: T);
+    fn end_vote(ref self: T);
     fn resolve_round(ref self: T, host_seed: felt252, salt: felt252);
     fn host(self: @T) -> starknet::ContractAddress;
     fn escrow(self: @T) -> starknet::ContractAddress;
@@ -706,6 +802,8 @@ pub trait ISignalRoundGame<T> {
     fn night_victim(self: @T) -> u32;
     fn role_commitment(self: @T) -> felt252;
     fn total_votes(self: @T) -> u256;
+    fn round_number(self: @T) -> u32;
+    fn ejection_in(self: @T, round: u32) -> u32;
     fn skip_tally(self: @T) -> u256;
     fn has_called_meeting(self: @T, seat: u32) -> bool;
     fn deadlines(self: @T) -> (u64, u64);

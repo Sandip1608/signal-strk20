@@ -136,6 +136,7 @@ export type Action =
   | { type: "kill"; seat: number; victim: number }
   | { type: "report"; seat: number }
   | { type: "skipNight" }
+  | { type: "endVote" }
   | { type: "callMeeting"; seat: number }
   | { type: "vent"; seat: number }
   | { type: "sabotageLights" }
@@ -252,6 +253,16 @@ export function applyAction(room: Room, action: Action): void {
 
     case "skipNight":
       room.game = engine.skipNight(g0);
+      break;
+
+    case "endVote":
+      room.game = engine.endVote(g0);
+      if (room.ship) {
+        room.ship = ship.resetForRound(
+          room.ship,
+          room.game.seats.map((x) => x.seat),
+        );
+      }
       break;
 
     case "vote":
