@@ -17,9 +17,25 @@ export type RoomView = {
   code: string;
   version: number;
   seat: number | null;
+  isHost: boolean;
   game: GameState;
   ship: ShipState | null;
 };
+
+export type LobbyListing = {
+  code: string;
+  seated: number;
+  maxPlayers: number;
+  hiddenCount: number;
+  hostName: string;
+};
+
+export async function fetchLobbies(): Promise<LobbyListing[]> {
+  const res = await fetch("/api/rooms", { cache: "no-store" });
+  if (!res.ok) return [];
+  const body = (await res.json()) as { rooms?: LobbyListing[] };
+  return body.rooms ?? [];
+}
 
 /** Identifies this browser to the server so a refresh reclaims its seat. */
 export function playerId(): string {
@@ -97,6 +113,7 @@ function reviveBigints(view: RoomView): RoomView {
   }
   return {
     ...view,
+    isHost: Boolean(view.isHost),
     game: {
       ...view.game,
       tallies,

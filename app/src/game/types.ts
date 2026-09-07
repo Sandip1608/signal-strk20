@@ -34,6 +34,11 @@ export const CEIL_PLAYERS = 15;
 /** `round.cairo::NO_SEAT` — the 0 sentinel in `seat + 1` fields. */
 export const NO_SEAT = 0;
 
+/** Player-facing seat number. Engine / contract seats stay 0-indexed. */
+export function displaySeat(seat: number): number {
+  return seat + 1;
+}
+
 /**
  * "IMPOSTOR" is the hidden team in every variant; the display name (Werewolf,
  * Fascist, Minion of Mordred) comes from the variant config, so the engine

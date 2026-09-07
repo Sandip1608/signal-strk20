@@ -31,6 +31,7 @@ import * as ship from "./ship";
 import type { RoomId, ShipState } from "./ship";
 import * as online from "./online";
 import { Phase, type GameState } from "./types";
+import { DEFAULT_SETTINGS, optsFromSettings } from "./variants";
 
 type Store = {
   game: GameState | null;
@@ -55,13 +56,18 @@ type Store = {
   /** Our own seat in an online room; null until we have joined one. */
   mySeat: number | null;
   connecting: boolean;
+  /** Host may retune the table in lobby. Local play treats the screen as host. */
+  isHost: boolean;
 
   newGame: (opts: RoundOpts) => void;
   resetGame: () => void;
+  configureLobby: (opts: RoundOpts) => void;
 
   addPlayer: (name: string, isBot?: boolean) => void;
   addBot: () => void;
   fillWithBots: () => void;
+  /** Empty the lobby (or drop bots online) without leaving the round settings. */
+  resetLobby: () => void;
   assignRoles: () => void;
   startNight: () => void;
   kill: (victimSeat: number) => void;
@@ -94,7 +100,7 @@ type Store = {
   seeRole: (seat: number) => void;
   clearError: () => void;
 
-  hostRoom: (name: string, opts: RoundOpts) => Promise<void>;
+  hostRoom: (name: string, opts?: RoundOpts) => Promise<void>;
   joinRoom: (code: string, name: string) => Promise<void>;
   leaveRoom: () => void;
   applyView: (view: online.RoomView) => void;
@@ -165,6 +171,7 @@ export const useGame = create<Store>((set, get) => ({
   roomCode: null,
   mySeat: null,
   connecting: false,
+  isHost: false,
 
   newGame: (opts) =>
     set({
@@ -179,10 +186,19 @@ export const useGame = create<Store>((set, get) => ({
       revealed: false,
       ship: null,
       error: null,
+      isHost: true,
     }),
 
   resetGame: () =>
-    set({ game: null, viewerSeat: null, revealed: false, ship: null, error: null }),
+    set({ game: null, viewerSeat: null, revealed: false, ship: null, error: null, isHost: false }),
+
+  configureLobby: (opts) => {
+    if (get().mode === "online") {
+      void get().send({ type: "configure", ...opts });
+      return;
+    }
+    apply(set, (g) => engine.configureLobby(g, opts));
+  },
 
   /**
    * Join a seat. The burner keypair is generated here and the wallet address
@@ -192,6 +208,7 @@ export const useGame = create<Store>((set, get) => ({
    */
   addPlayer: (name, isBot = false) => {
     if (get().mode === "online") {
+      if (get().mySeat !== null) return;
       void get().send({ type: "join", name });
       return;
     }
@@ -226,6 +243,27 @@ export const useGame = create<Store>((set, get) => ({
     for (let i = g.seats.length; i < g.minPlayers; i += 1) {
       get().addBot();
     }
+  },
+
+  resetLobby: () => {
+    if (get().mode === "online") {
+      void get().send({ type: "resetLobby" });
+      return;
+    }
+    const g = get().game;
+    if (!g || g.phase !== Phase.LOBBY) return;
+    const humans = g.seats.filter((x) => !x.isBot).sort((a, b) => a.seat - b.seat);
+    get().newGame({
+      nightDurationSecs: g.nightDurationSecs,
+      voteDurationSecs: g.voteDurationSecs,
+      minPlayers: g.minPlayers,
+      maxPlayers: g.maxPlayers,
+      hiddenCount: g.hiddenCount,
+      seerCount: g.seerCount,
+      tasksPerPlayer: g.tasksPerPlayer,
+      confirmEjects: g.confirmEjects,
+    });
+    for (const who of humans) get().addPlayer(who.name);
   },
 
   /** Host draws the impostor, commits to it, and sends the encrypted notes. */
@@ -596,7 +634,7 @@ export const useGame = create<Store>((set, get) => ({
   // ── online ───────────────────────────────────────────────────────────
 
   /** Open a relayed room and take the first seat. */
-  hostRoom: async (name, opts) => {
+  hostRoom: async (name, opts = optsFromSettings(DEFAULT_SETTINGS)) => {
     set({ connecting: true, error: null });
     try {
       const code = await online.createRoom(opts);
@@ -613,6 +651,8 @@ export const useGame = create<Store>((set, get) => ({
   joinRoom: async (code, name) => {
     set({ connecting: true, error: null, mode: "online", roomCode: code.toUpperCase() });
     try {
+      // `join` is idempotent per playerId — a second click or a refresh
+      // returns the existing seat instead of opening another.
       const view = await online.sendAction(code.toUpperCase(), { type: "join", name });
       get().applyView(view);
     } catch (e) {
@@ -632,6 +672,7 @@ export const useGame = create<Store>((set, get) => ({
       viewerSeat: null,
       revealed: false,
       error: null,
+      isHost: false,
     }),
 
   /**
@@ -648,6 +689,7 @@ export const useGame = create<Store>((set, get) => ({
       roomCode: view.code,
       viewerSeat: view.seat,
       revealed: true,
+      isHost: view.isHost,
     }),
 
   /** Post one action and fold in the resulting view. */

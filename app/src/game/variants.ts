@@ -68,6 +68,49 @@ export const DEFAULT_SETTINGS: Settings = {
   confirmEjects: true,
 };
 
+/** Presets that fill the length fields; the host can still tune them. */
+export const PACES = [
+  { key: "demo", label: "Demo", night: 35, vote: 15 },
+  { key: "quick", label: "Quick", night: 60, vote: 40 },
+  { key: "full", label: "Full", night: 90, vote: 120 },
+  { key: "table", label: "Table", night: 600, vote: 240 },
+] as const;
+
+/** Constructor-shaped opts the store and relay both accept. */
+export function optsFromSettings(s: Settings) {
+  const n = normalise(s);
+  return {
+    nightDurationSecs: n.nightSecs,
+    voteDurationSecs: n.voteSecs,
+    minPlayers: minPlayersFor(n.impostors),
+    maxPlayers: n.maxPlayers,
+    hiddenCount: n.impostors,
+    seerCount: n.seer ? 1 : 0,
+    tasksPerPlayer: n.tasksPerPlayer,
+    confirmEjects: n.confirmEjects,
+  };
+}
+
+export function settingsFromGame(g: {
+  hiddenCount: number;
+  maxPlayers: number;
+  tasksPerPlayer: number;
+  seerCount: number;
+  nightDurationSecs: number;
+  voteDurationSecs: number;
+  confirmEjects: boolean;
+}): Settings {
+  return normalise({
+    impostors: g.hiddenCount,
+    maxPlayers: g.maxPlayers,
+    tasksPerPlayer: g.tasksPerPlayer,
+    seer: g.seerCount > 0,
+    nightSecs: g.nightDurationSecs,
+    voteSecs: g.voteDurationSecs,
+    confirmEjects: g.confirmEjects,
+  });
+}
+
 /**
  * Seats needed before roles can be assigned.
  *

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Fragment, useEffect, useState } from "react";
 import s from "./play.module.css";
 import { livingSeats, short } from "@/game/engine";
-import { Phase, type GameState, type LogEntry, type PhaseValue, type Seat } from "@/game/types";
+import { Phase, displaySeat, type GameState, type LogEntry, type PhaseValue, type Seat } from "@/game/types";
 
 /**
  * Ticks once a second against a deadline.
@@ -211,7 +211,7 @@ export function SeatGrid({
               .filter(Boolean)
               .join(" ")}
           >
-            <span className={s.seatNum}>Seat {seat.seat}</span>
+            <span className={s.seatNum}>Seat {displaySeat(seat.seat)}</span>
             <span className={s.seatName}>{seat.name}</span>
             <span className={s.seatMeta}>{metaFor?.(seat) ?? short(seat.sessionKey)}</span>
             {tag && <span className={`${s.seatTag} ${tag.className}`}>{tag.label}</span>}

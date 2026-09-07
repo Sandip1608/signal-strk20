@@ -36,7 +36,7 @@ import {
   type ShipState,
 } from "@/game/ship";
 import { Crewmate } from "./Crewmate";
-import type { Seat } from "@/game/types";
+import { displaySeat, type Seat } from "@/game/types";
 
 /**
  * Corridors joining adjacent rooms, drawn behind the grid.
@@ -373,7 +373,7 @@ export function ShipMap({
           {Object.entries(known).map(([seat, guilty]) => (
             <li key={seat} className={guilty ? s.checkGuilty : s.checkClear}>
               <span className={s.taskTick}>{guilty ? "!" : "✓"}</span>
-              {living.find((x) => x.seat === Number(seat))?.name ?? `Seat ${seat}`} —{" "}
+              {living.find((x) => x.seat === Number(seat))?.name ?? `Seat ${displaySeat(Number(seat))}`} —{" "}
               {guilty ? "an impostor" : "not an impostor"}
             </li>
           ))}
