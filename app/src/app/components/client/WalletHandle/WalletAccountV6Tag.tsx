@@ -16,7 +16,6 @@ const TOKEN = constants.addrSTRK;
 // DEMO amounts, in the token's smallest unit (1e18 = 1 STRK). Replace with real
 // UX (user-entered amounts) in your app.
 const TEN_STRK = 10n * 10n ** 18n;
-const FIVE_STRK = 5n * 10n ** 18n;
 const ONE_STRK = 1n * 10n ** 18n;
 
 // Format a felt amount (STRK, 18 decimals) as a human STRK string ("10", "1.5").
@@ -329,9 +328,9 @@ export default function WalletAccountV6Tag() {
     await submit(actions, setResultTransfer, "1 STRK");
   };
 
-  // Complex action - echo invoke round-trip: withdraw 5 STRK to the helper, create an
+  // Complex action - echo invoke round-trip: withdraw 1 STRK to the helper, create an
   // open note for the output, and invoke the helper to fill it. Then verify the Invoked
-  // event on-chain (open note filled with 5 STRK).
+  // event on-chain (open note filled with 1 STRK).
   const handleComplex = async () => {
     setResultComplex(null);
     setVerdictComplex(null);
@@ -343,7 +342,7 @@ export default function WalletAccountV6Tag() {
     // "OPEN" / ${poolAddress} / ${openNoteIds[0]} are literal placeholder strings the
     // wallet substitutes during assembly - they must NOT be hex-normalized.
     const actions: WALLET_API.STRK20_ACTION[] = [
-      { type: "withdraw", token: TOKEN, amount: num.toHex(FIVE_STRK), recipient: helper },
+      { type: "withdraw", token: TOKEN, amount: num.toHex(ONE_STRK), recipient: helper },
       { type: "transfer", token: TOKEN, amount: "OPEN", recipient: connectedAddress },
       {
         type: "invoke",
@@ -351,7 +350,7 @@ export default function WalletAccountV6Tag() {
         calldata: [num.toHex(TOKEN), "${poolAddress}", "${openNoteIds[0]}"],
       },
     ];
-    const txH = await submit(actions, setResultComplex, "5 STRK");
+    const txH = await submit(actions, setResultComplex, "1 STRK");
     if (!txH) return;
     setVerdictComplex({
       ok: false,
@@ -363,7 +362,7 @@ export default function WalletAccountV6Tag() {
   };
 
   // Fetch the tx receipt and verify the helper's Invoked event: the open note was filled
-  // with the 5 STRK we withdrew. Returns a pass/fail verdict (never throws).
+  // with the 1 STRK we withdrew. Returns a pass/fail verdict (never throws).
   async function verifyEcho(txHash: string): Promise<Verdict> {
     try {
       // Use the frontend provider that tracks the current network, not
@@ -408,10 +407,10 @@ export default function WalletAccountV6Tag() {
       const noteId = ev.keys[1] as string;
       const amount = ev.data[0] as string;
       const caller = ev.data[1] as string;
-      const amountOk = num.toBigInt(amount) === FIVE_STRK;
+      const amountOk = num.toBigInt(amount) === ONE_STRK;
       return {
         ok: amountOk,
-        title: amountOk ? "Echo verified - open note filled with 5 STRK" : "Event found, but amount mismatch",
+        title: amountOk ? "Echo verified - open note filled with 1 STRK" : "Event found, but amount mismatch",
         rows: [
           { label: "note_id", value: shortHex(noteId), ok: true },
           { label: "amount", value: `${fmtStrk(num.toBigInt(amount))} STRK`, ok: amountOk },

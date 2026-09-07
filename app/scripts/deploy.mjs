@@ -31,7 +31,9 @@ const STRK20_JSON = resolve(HERE, "../../strk20.json");
 /** STRK20 privacy pool, Starknet mainnet. Verified live before hard-coding. */
 const NETWORKS = {
   mainnet: {
-    rpc: "https://rpc.starknet.lava.build:443",
+    // Keyless public RPC (Cartridge). Verified live: returns the pool class
+    // 0x67dddd… below. Override with STARKNET_RPC for a dedicated endpoint.
+    rpc: "https://api.cartridge.gg/x/starknet/mainnet",
     // Verified live before hard-coding: class hash 0x67dd...554d at this address.
     pool: "0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a",
   },
