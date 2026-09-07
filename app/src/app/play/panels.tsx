@@ -393,6 +393,22 @@ export function NightPanel({ game }: { game: GameState }) {
           <p className={s.panelHint}>The deck is not ready.</p>
         )}
 
+        {/* A night can end with nobody killed, and then someone has to say so.
+            This control lived only in the pass-the-device roster below, which
+            pinning the viewer to one player made unreachable — so an expired
+            night with no body had no way forward at all. A ghost felt it worst:
+            they cannot call a meeting either, so the round simply stopped. */}
+        {nightOver.passed && (
+          <div className={s.btnRow}>
+            <button type="button" className={`${s.btn} ${s.btnGhost}`} onClick={skipNight}>
+              Skip night (host)
+            </button>
+            <span className={s.tagline}>
+              The night is over and no body was reported — call everyone in.
+            </span>
+          </div>
+        )}
+
         {/* Nothing to hide from when the screen has one owner. */}
         {own === null && (
           <div className={s.btnRow}>
