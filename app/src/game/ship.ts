@@ -6,12 +6,11 @@
  * the contract has no concept of a room or a task, and this must not start
  * looking like it does.
  *
- * Tasks deliberately do **not** decide the round. In Among Us finishing tasks
- * is a crew win condition; here the winner is whatever `resolve_round` computes
- * from the vote, and inventing a second win condition would put the UI and the
- * contract into disagreement. Instead tasks generate *evidence*: moving around
- * to do them is what produces sightings, and sightings are what the crew argue
- * from at the meeting. The vote stays the only thing that settles the round.
+ * Tasks are also the crew's second win condition. Completions are submitted
+ * on-chain (`submit_task`); `resolve_round` counts only crew seats — ghosts
+ * included — and the last job opens the commitment immediately. Until the bar
+ * is full they still generate *evidence*: moving around to do them produces
+ * sightings, which is what the crew argue from if a meeting is called first.
  */
 
 export type RoomId =
@@ -673,11 +672,11 @@ export function completeTask(
  * Reward for finishing a task list: a couple of movements you did not witness
  * yourself.
  *
- * This is what stops tasks being busywork. It deliberately does **not** touch
- * the win condition — the round is still decided by whatever `resolve_round`
- * computes from the vote, and a second win condition would put the UI and the
- * contract into disagreement. What finishing your tasks buys is *evidence*,
- * which is the currency the vote actually runs on.
+ * This is what stops tasks being busywork. Finishing the crew's whole list
+ * also wins the round — `resolve_round` counts only crew submissions, ghosts
+ * included, and the last job opens the commitment immediately. What each
+ * finished list also buys is *evidence* (the security log), which is the
+ * currency the vote runs on if the bar is not yet full.
  *
  * Entries are marked `viaLog` so the ballot can show them as hearsay from the
  * logs rather than something you saw with your own eyes.

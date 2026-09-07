@@ -136,6 +136,30 @@ mod tests {
         assert(!ejects(3, true, 0), 'player tie should hold');
     }
 
+    /// Clock ran out with uncast stakes: those remainder votes join the skip
+    /// pile. `alive - cast` is the only encoding the contract has, because the
+    /// votes themselves are anonymous.
+    fn timeout_skip(cast: u256, alive: u256, skip: u256) -> u256 {
+        if cast >= alive {
+            skip
+        } else {
+            skip + (alive - cast)
+        }
+    }
+
+    #[test]
+    fn uncast_votes_at_timeout_become_skips() {
+        assert(timeout_skip(2, 5, 0) == 3, 'three abstentions');
+        assert(timeout_skip(5, 5, 1) == 1, 'no extra if all voted');
+    }
+
+    #[test]
+    fn timeout_skips_that_beat_the_leader_eject_nobody() {
+        // Two accusations, three abstentions → skip 3 >= 2.
+        let skip = timeout_skip(2, 5, 0);
+        assert(!ejects(2, false, skip), 'abstentions should hold');
+    }
+
     #[test]
     fn all_zero_tallies_eject_nobody() {
         assert(!ejects(0, false, 0), 'no votes should eject nobody');
@@ -406,6 +430,14 @@ mod tests {
         assert(!over(1, 4, 0, 11, 12), 'not over at 11 of 12');
         assert(over(1, 4, 0, 12, 12), 'the last task ends it');
         assert(crew_won_with(1, 4, 12, 12), 'crew should win');
+    }
+
+    /// Night may only resolve if the jobs are actually done — otherwise
+    /// anyone could skip the vote. Vote still uses the full `over` rule.
+    #[test]
+    fn night_resolve_requires_the_task_win() {
+        assert(!tasks_won(8, 12), 'night must not finish early');
+        assert(tasks_won(12, 12), 'full bar may resolve at night');
     }
 
     /// Finishing the list beats parity. The crew completed the objective the

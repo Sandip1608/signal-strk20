@@ -249,7 +249,12 @@ export function applyAction(room: Room, action: Action): void {
     }
 
     case "resetLobby": {
-      if (g0.phase !== Phase.LOBBY) throw new engine.ContractError("not in lobby");
+      // Lobby: drop bots and reseat humans. Resolved: the same, so "Return to
+      // lobby" after payout actually opens a new table instead of the client
+      // clearing local state that the next poll puts right back.
+      if (g0.phase !== Phase.LOBBY && g0.phase !== Phase.RESOLVED) {
+        throw new engine.ContractError("round still in play");
+      }
       const humans = [...g0.seats]
         .filter((s) => !s.isBot)
         .sort((a, b) => a.seat - b.seat);
@@ -367,6 +372,7 @@ export function applyAction(room: Room, action: Action): void {
           crewSeatsOf(room.game),
         );
       }
+      finishIfCrewTasksWon(room);
       break;
     }
 
@@ -527,45 +533,9 @@ export function applyAction(room: Room, action: Action): void {
      * could not see — which is precisely what happened: a table voted out the
      * last impostor and the game cheerfully started another night.
      */
-    case "continue": {
-      if (room.hiddenSeats.length === 0) throw new engine.ContractError("roles not assigned");
-      // A blown reactor is decided before anything else: the contract watched
-      // its own deadline pass, so it needs nobody's word for it.
-      if (room.ship && ship.reactorBlown(room.ship)) {
-        room.game = engine.resolveSabotage(g0, {
-          hiddenSeats: room.hiddenSeats,
-          salt: room.salt,
-          hostSeed: room.hostSeed,
-          recomputedCommitment: poseidonCommitment(room.hiddenSeats, room.salt),
-          recomputedSeedCommitment: seedCommitment(room.hostSeed),
-        });
-        break;
-      }
-      try {
-        room.game = engine.resolveRound(g0, {
-          hiddenSeats: room.hiddenSeats,
-          salt: room.salt,
-          hostSeed: room.hostSeed,
-          recomputedCommitment: poseidonCommitment(room.hiddenSeats, room.salt),
-          recomputedSeedCommitment: seedCommitment(room.hostSeed),
-        });
-        break;
-      } catch (e) {
-        if (!(e instanceof engine.ContractError) || e.message !== "game not over") throw e;
-      }
-      // Not decided: play the next round instead.
-      if (room.ship && ship.reactorBlown(room.ship)) {
-        throw new engine.ContractError("resolve the reactor");
-      }
-      room.game = engine.endVote(g0);
-      if (room.ship) {
-        room.ship = ship.withCrewProgress(
-          ship.resetForRound(room.ship, room.game.seats.map((x) => x.seat)),
-          crewSeatsOf(room.game),
-        );
-      }
+    case "continue":
+      tryFinishOrNextNight(room);
       break;
-    }
 
     case "payout":
       room.game = engine.payout(g0);
@@ -574,6 +544,61 @@ export function applyAction(room: Room, action: Action): void {
 
   room.version += 1;
   room.lastTouchedAt = Date.now();
+}
+
+/**
+ * Finish the game if the opened roles say it is over, otherwise start the
+ * next night. Shared by the host's Continue button and the vote-clock tick.
+ */
+function tryFinishOrNextNight(room: Room): void {
+  if (room.hiddenSeats.length === 0) throw new engine.ContractError("roles not assigned");
+  const g0 = room.game;
+  // A blown reactor is decided before anything else: the contract watched
+  // its own deadline pass, so it needs nobody's word for it. Shared with the
+  // night-deck Continue — that button is the only legal move once it blows.
+  if (room.ship && ship.reactorBlown(room.ship)) {
+    room.game = engine.resolveSabotage(g0, {
+      hiddenSeats: room.hiddenSeats,
+      salt: room.salt,
+      hostSeed: room.hostSeed,
+      recomputedCommitment: poseidonCommitment(room.hiddenSeats, room.salt),
+      recomputedSeedCommitment: seedCommitment(room.hostSeed),
+    });
+    return;
+  }
+  try {
+    room.game = engine.resolveRound(g0, {
+      hiddenSeats: room.hiddenSeats,
+      salt: room.salt,
+      hostSeed: room.hostSeed,
+      recomputedCommitment: poseidonCommitment(room.hiddenSeats, room.salt),
+      recomputedSeedCommitment: seedCommitment(room.hostSeed),
+    });
+    return;
+  } catch (e) {
+    if (!(e instanceof engine.ContractError) || e.message !== "game not over") throw e;
+  }
+  room.game = engine.endVote(g0);
+  if (room.ship) {
+    room.ship = ship.withCrewProgress(
+      ship.resetForRound(room.ship, room.game.seats.map((x) => x.seat)),
+      crewSeatsOf(room.game),
+    );
+  }
+}
+
+/** Last crew job done: open the commitment and award the round. */
+function finishIfCrewTasksWon(room: Room): void {
+  if (room.hiddenSeats.length === 0) return;
+  if (!engine.crewTasksWon(room.game, room.hiddenSeats)) return;
+  if (room.game.phase !== Phase.NIGHT && room.game.phase !== Phase.VOTE) return;
+  room.game = engine.resolveRound(room.game, {
+    hiddenSeats: room.hiddenSeats,
+    salt: room.salt,
+    hostSeed: room.hostSeed,
+    recomputedCommitment: poseidonCommitment(room.hiddenSeats, room.salt),
+    recomputedSeedCommitment: seedCommitment(room.hostSeed),
+  });
 }
 
 /** Only an impostor may sabotage, and not on cooldown. */
@@ -679,6 +704,26 @@ export function tickBots(room: Room): void {
     }
   } catch {
     // A bot racing a human (both voting the same tick) can lose; skip the beat.
+  }
+}
+
+/**
+ * When the vote clock runs out, uncast ballots become skips and the round
+ * either ends or night falls again — no host click required.
+ *
+ * Runs off the same client polls as `tickBots`, so an abandoned room still
+ * stops dead. Not routed through `applyAction` because Continue is host-only
+ * and this is the clock, not a player.
+ */
+export function tickVoteClose(room: Room): void {
+  if (room.game.phase !== Phase.VOTE) return;
+  if (Date.now() <= room.game.voteDeadline) return;
+  try {
+    tryFinishOrNextNight(room);
+    room.version += 1;
+    room.lastTouchedAt = Date.now();
+  } catch {
+    // Don't stall the poll on a racing host click.
   }
 }
 

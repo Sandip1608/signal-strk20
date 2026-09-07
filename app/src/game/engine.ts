@@ -574,6 +574,41 @@ export function ballotClosed(state: GameState, now = Date.now()): boolean {
 }
 
 /**
+ * When the vote clock runs out, every living seat that did not cast is a skip.
+ *
+ * Votes are anonymous on-chain, so this cannot name who abstained — it only
+ * knows how many stakes never arrived (`living - totalVotes`) and adds that
+ * weight to the skip pile. Same arithmetic the contract uses; `hasVoted` is
+ * local bookkeeping so the table stops showing those seats as still to vote.
+ */
+export function absorbAbstentions(state: GameState, now = Date.now()): GameState {
+  if (state.phase !== Phase.VOTE) return state;
+  if (now <= state.voteDeadline) return state;
+  const livingN = state.seats.filter((x) => !x.dead).length;
+  const target = BigInt(livingN) * VOTE_WEIGHT;
+  const missing = state.totalVotes >= target ? 0n : target - state.totalVotes;
+  const seats = state.seats.map((s) =>
+    !s.dead && !s.hasVoted ? { ...s, hasVoted: true } : s,
+  );
+  if (missing === 0n) {
+    return seats === state.seats ? state : { ...state, seats };
+  }
+  const skipTally = state.skipTally + missing;
+  return log(
+    {
+      ...state,
+      seats,
+      skipTally,
+      totalVotes: state.totalVotes + missing,
+    },
+    {
+      call: "ballot_closed",
+      text: `${missing} uncast vote${missing === 1n ? "" : "s"} counted as skip. Skip pile now ${skipTally}.`,
+    },
+  );
+}
+
+/**
  * `end_vote()` - close this round's vote and open the next night.
  *
  * The contract cannot tell whether the game is over: that needs the roles, and
@@ -589,6 +624,7 @@ export function endVote(state: GameState, now = Date.now()): GameState {
   require_(ballotClosed(state, now), "vote still open");
   require_(state.roundNumber + 1 < MAX_ROUNDS, "too many rounds");
 
+  state = absorbAbstentions(state, now);
   const ejected = computeEjected(state);
   const seats = state.seats.map((x) => ({
     ...x,
@@ -639,6 +675,23 @@ export function endVote(state: GameState, now = Date.now()): GameState {
 }
 
 /**
+ * Crew task objective, counted only over seats the opened roles say are crew.
+ * Ghosts count — a dead crewmate's finished jobs still fill the bar.
+ */
+export function crewTasksWon(state: GameState, hiddenSeats: number[]): boolean {
+  const hidden = new Set(hiddenSeats);
+  let crewTasks = 0;
+  let crewSeats = 0;
+  for (const x of state.seats) {
+    if (hidden.has(x.seat)) continue;
+    crewTasks += state.tasksDone[x.seat] ?? 0;
+    crewSeats += 1;
+  }
+  const target = crewSeats * state.tasksPerPlayer;
+  return target !== 0 && crewTasks >= target;
+}
+
+/**
  * Mirrors `resolve_round`. The caller does the hashing (this module stays free
  * of crypto dependencies) but every check the contract makes is made here, in
  * the same order and with the same messages.
@@ -654,8 +707,14 @@ export function resolveRound(
   },
   now = Date.now(),
 ): GameState {
-  require_(state.phase === Phase.VOTE, "not in vote phase");
-  require_(ballotClosed(state, now), "vote still open");
+  require_(
+    state.phase === Phase.VOTE || state.phase === Phase.NIGHT,
+    "not in vote phase",
+  );
+  if (state.phase === Phase.VOTE) {
+    require_(ballotClosed(state, now), "vote still open");
+    state = absorbAbstentions(state, now);
+  }
   require_(p.recomputedSeedCommitment === state.seedCommitment, "seed mismatch");
   require_(p.hiddenSeats.length === state.hiddenCount, "wrong hidden count");
   for (const seat of p.hiddenSeats) {
@@ -680,20 +739,7 @@ export function resolveRound(
     if (hidden.has(x.seat)) impostorsAlive += 1;
     else crewAlive += 1;
   }
-  // The crew's own objective, counted only over the seats the opened roles
-  // say are crew. Ghosts count — a dead crewmate's finished tasks still filled
-  // the bar, exactly as in Among Us.
-  let crewTasks = 0;
-  let crewSeats = 0;
-  for (const x of afterSeats) {
-    if (hidden.has(x.seat)) continue;
-    crewTasks += state.tasksDone[x.seat] ?? 0;
-    crewSeats += 1;
-  }
-  const target = crewSeats * state.tasksPerPlayer;
-  // A zero target means tasks are off; without this the crew would win on
-  // round 0 for doing nothing.
-  const tasksWon = target !== 0 && crewTasks >= target;
+  const tasksWon = crewTasksWon({ ...state, seats: afterSeats }, p.hiddenSeats);
 
   const impostorsWon = impostorsAlive >= crewAlive;
 
@@ -704,7 +750,13 @@ export function resolveRound(
   // legal move left and the stakes stayed locked. Surviving to the cap is a
   // crew win.
   const capped = state.roundNumber + 1 >= MAX_ROUNDS;
-  require_(impostorsAlive === 0 || impostorsWon || tasksWon || capped, "game not over");
+  if (state.phase === Phase.NIGHT) {
+    // Night may only end here if the crew actually finished their jobs —
+    // otherwise this would let anyone skip the vote.
+    require_(tasksWon, "game not over");
+  } else {
+    require_(impostorsAlive === 0 || impostorsWon || tasksWon || capped, "game not over");
+  }
 
   // Equivalent to `impostorsAlive === 0` in the two original cases, since the
   // guard above rules out anything else, and it is what decides a capped round.
@@ -728,11 +780,14 @@ export function resolveRound(
     {
       call: "resolve_round",
       text:
-        `Commitment opened: the hidden team was ${p.hiddenSeats.map(displaySeat).join(", ")}. ` +
-        (ejected === 0
-          ? "The vote tied — nobody was ejected, so the impostor survives."
-          : `Seat ${ejected} was ejected.`) +
-        ` ${crewWon ? "Crew win." : "Impostor wins."}`,
+        (tasksWon
+          ? "Crew completed every assigned job. "
+          : `Commitment opened: the hidden team was ${p.hiddenSeats.map(displaySeat).join(", ")}. ` +
+            (ejected === 0
+              ? "The vote tied — nobody was ejected, so the impostor survives. "
+              : `Seat ${ejected} was ejected. `)) +
+        `${crewWon ? "Crew win." : "Impostor wins."}` +
+        (crewWon ? " The pot credits every crewmate, living or dead." : ""),
     },
   );
 }

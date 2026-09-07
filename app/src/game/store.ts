@@ -58,6 +58,11 @@ type Store = {
   connecting: boolean;
   /** Host may retune the table in lobby. Local play treats the screen as host. */
   isHost: boolean;
+  /** Last applied relay version — skip polls that have not changed anything. */
+  roomVersion: number;
+  /** The end-game airlock has already played; do not remount it on every poll. */
+  ejectionDone: boolean;
+  dismissEjection: () => void;
 
   newGame: (opts: RoundOpts) => void;
   resetGame: () => void;
@@ -172,6 +177,9 @@ export const useGame = create<Store>((set, get) => ({
   mySeat: null,
   connecting: false,
   isHost: false,
+  roomVersion: 0,
+  ejectionDone: false,
+  dismissEjection: () => set({ ejectionDone: true }),
 
   newGame: (opts) =>
     set({
@@ -187,10 +195,34 @@ export const useGame = create<Store>((set, get) => ({
       ship: null,
       error: null,
       isHost: true,
+      ejectionDone: false,
     }),
 
-  resetGame: () =>
-    set({ game: null, viewerSeat: null, revealed: false, ship: null, error: null, isHost: false }),
+  resetGame: () => {
+    // Online the server is the source of truth. Clearing `game` here just
+    // flashes the start screen until the next poll restores RESOLVED — and
+    // resets `ejectionDone`, so the airlock scene plays again on the same
+    // payout page. Host opens a fresh lobby for everyone still in the room;
+    // anyone else leaves.
+    if (get().mode === "online") {
+      if (get().isHost) {
+        void get().send({ type: "resetLobby" });
+      } else {
+        get().leaveRoom();
+      }
+      return;
+    }
+    set({
+      game: null,
+      viewerSeat: null,
+      revealed: false,
+      ship: null,
+      error: null,
+      isHost: false,
+      ejectionDone: false,
+      roomVersion: 0,
+    });
+  },
 
   configureLobby: (opts) => {
     if (get().mode === "online") {
@@ -347,6 +379,8 @@ export const useGame = create<Store>((set, get) => ({
       });
       return { ship: ship.withCrewProgress(next, crewSeatsOf(st.game)) };
     });
+    const g = get().game;
+    if (g && engine.crewTasksWon(g, g.hiddenSeats)) get().resolve();
   },
 
   kill: (victimSeat) => {
@@ -532,14 +566,17 @@ export const useGame = create<Store>((set, get) => ({
    * "game not over" as the answer rather than an error.
    */
   continueRound: () => {
+    const g = get().game;
+    if (!g) return;
     if (get().mode === "online") {
       void get().send({ type: "continue" });
       return;
     }
-    const g = get().game;
-    if (!g || g.hiddenSeats.length === 0) return;
+    if (g.hiddenSeats.length === 0) return;
     const st = get();
     // A blown reactor is decided before anything else — see the relay's note.
+    // This is the one Continue that is legal during NIGHT (the deck button),
+    // so it has to run before the vote-phase gate below.
     if (st.ship && ship.reactorBlown(st.ship)) {
       apply(set, (s) =>
         engine.resolveSabotage(s, {
@@ -552,6 +589,7 @@ export const useGame = create<Store>((set, get) => ({
       );
       return;
     }
+    if (g.phase !== Phase.VOTE) return;
     try {
       const finished = engine.resolveRound(g, {
         hiddenSeats: g.hiddenSeats,
@@ -692,6 +730,8 @@ export const useGame = create<Store>((set, get) => ({
       revealed: false,
       error: null,
       isHost: false,
+      ejectionDone: false,
+      roomVersion: 0,
     }),
 
   /**
@@ -700,7 +740,15 @@ export const useGame = create<Store>((set, get) => ({
    * `viewerSeat`/`revealed` are pinned to our own seat: online there is no
    * device to pass, so the cover screen would only be in the way.
    */
-  applyView: (view) =>
+  applyView: (view) => {
+    const prev = get();
+    if (
+      prev.roomCode === view.code &&
+      prev.roomVersion === view.version &&
+      prev.game !== null
+    ) {
+      return;
+    }
     set({
       game: view.game,
       ship: view.ship,
@@ -709,7 +757,11 @@ export const useGame = create<Store>((set, get) => ({
       viewerSeat: view.seat,
       revealed: true,
       isHost: view.isHost,
-    }),
+      roomVersion: view.version,
+      ejectionDone:
+        view.game.phase === Phase.RESOLVED ? prev.ejectionDone : false,
+    });
+  },
 
   /** Post one action and fold in the resulting view. */
   send: async (action) => {

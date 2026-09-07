@@ -70,11 +70,16 @@ everything identifying is shielded.
 4. **Vote.** Each living player votes by running a `privacy_invoke` (phase
    7) against `SignalEscrow` with `operation = Vote` and the candidate
    seat as the payload. The tally accumulates publicly in `SignalRound`;
-   the voters stay inside the pool.
-5. **Resolve.** After the deadline, `resolve_round(impostor_seat, salt)`
-   opens the commitment. Ejected = strict-max tally (ties eject nobody →
-   impostor survives → impostor wins). Crew win ⇢ crew (dead included)
-   split the pot; impostor win ⇢ impostor takes it.
+   the voters stay inside the pool. If the clock runs out, uncast stakes
+   are counted as skip (`absorb_abstentions`) and the round either
+   resolves or night falls again — a skip that ties or beats the leader
+   ejects nobody.
+5. **Resolve.** After the deadline — or immediately when the crew finish
+   every job during the night — `resolve_round(host_seed, salt)` opens the
+   commitment. Ejected = strict-max tally (ties eject nobody). Crew also
+   win by filling the task bar (`submit_task`, counted only over crew
+   seats, ghosts included). Crew win ⇢ every crewmate (dead included)
+   splits the pot; impostor win ⇢ the hidden team takes it.
 6. **Payout.** One `privacy_invoke` with `operation = Payout` moves the
    pot note through the escrow and back into the winners' payout notes as
    shielded credits.

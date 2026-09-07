@@ -196,6 +196,39 @@ function Keypad({ digits, onSolve }: { digits: number; onSolve: () => void }) {
   const correct = entered.length === code.length && entered === code;
   useSolveOnce(correct, onSolve, 380);
 
+  const press = useCallback(
+    (n: number) => {
+      if (wrong || correct) return;
+      setEntered((e) => (e.length < code.length ? e + String(n) : e));
+    },
+    [wrong, correct, code.length],
+  );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target;
+      if (
+        t instanceof HTMLElement &&
+        (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.key >= "0" && e.key <= "9") {
+        e.preventDefault();
+        press(Number(e.key));
+        return;
+      }
+      if (e.key === "Backspace") {
+        e.preventDefault();
+        if (wrong || correct) return;
+        setEntered((prev) => prev.slice(0, -1));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [press, wrong, correct]);
+
   // A wrong code clears itself; this timer is safe to re-run since it only
   // resets local state.
   useEffect(() => {
@@ -210,7 +243,7 @@ function Keypad({ digits, onSolve }: { digits: number; onSolve: () => void }) {
 
   return (
     <div className={s.game}>
-      <p className={s.gameHint}>Enter this code</p>
+      <p className={s.gameHint}>Type or tap this code</p>
       <p className={s.codeTarget}>{code}</p>
 
       <div className={`${s.codeDisplay} ${wrong ? s.codeWrong : ""}`}>
@@ -227,7 +260,7 @@ function Keypad({ digits, onSolve }: { digits: number; onSolve: () => void }) {
             key={n}
             type="button"
             className={s.key}
-            onClick={() => !wrong && setEntered((e) => (e.length < code.length ? e + n : e))}
+            onClick={() => press(n)}
           >
             {n}
           </button>

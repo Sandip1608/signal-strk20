@@ -162,6 +162,8 @@ which is precisely why the entrypoint does not need to know who is who.
 
 Finishing the list outranks impostor parity: the crew completed the objective
 the game sets them, and an impostor who allowed that has lost on the count.
+A crew win pays **every crewmate**, including the dead — the pot is a team
+credit, not a survivor bonus.
 
 ## Build and test
 

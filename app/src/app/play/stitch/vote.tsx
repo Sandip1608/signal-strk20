@@ -185,6 +185,11 @@ export function VoteTable({
           <span className={st.pillGold}>
             {committed} / {living.length} committed
           </span>
+          {living.length - committed > 0 ? (
+            <p className={st.hint} style={{ marginTop: 8 }}>
+              {living.length - committed} uncast — counted as skip if the clock runs out.
+            </p>
+          ) : null}
           <div style={{ marginTop: 10 }}>
             {living.map((seat) => {
               const t = game.tallies[seat.seat] ?? 0n;

@@ -218,11 +218,13 @@ function StartScreen({
           </li>
           <li>
             <strong>Meeting.</strong> Report a body or call an emergency. Vote anonymously — the
-            tally is public, the voter is not. A skip that ties or leads ejects nobody.
+            tally is public, the voter is not. Uncast ballots become skips when the clock runs
+            out. A skip that ties or leads ejects nobody.
           </li>
           <li>
-            <strong>Win.</strong> Crew win by ejecting every impostor. Impostors win if they equal
-            or outnumber the living crew, or if the reactor melts down.
+            <strong>Win.</strong> Crew win by ejecting every impostor or finishing every job.
+            Impostors win if they equal or outnumber the living crew, or if the reactor melts
+            down. A crew win pays every crewmate, including the dead.
           </li>
         </ol>
       </div>

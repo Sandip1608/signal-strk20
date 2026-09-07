@@ -8,6 +8,7 @@ import {
   jsonSafe,
   seatOfPlayer,
   tickBots,
+  tickVoteClose,
   viewFor,
   type Action,
 } from "@/server/rooms";
@@ -27,6 +28,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ code: string }>
   if (!room) return NextResponse.json({ error: "no such room" }, { status: 404 });
 
   const playerId = new URL(req.url).searchParams.get("playerId");
+  tickVoteClose(room);
   tickBots(room);
 
   return NextResponse.json(jsonSafe(viewFor(room, seatOfPlayer(room, playerId), playerId)));
@@ -93,6 +95,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
     throw e;
   }
 
+  tickVoteClose(room);
   tickBots(room);
   // Read the claim after the action: `join` just created it, and `resetLobby`
   // may have reindexed it. The pre-action value would leave a new joiner

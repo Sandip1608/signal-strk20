@@ -703,6 +703,7 @@ pub mod SignalRound {
             self.assert_host();
             assert(self.phase.read() == phases::VOTE, 'not in vote phase');
             assert(self.ballot_closed(), 'vote still open');
+            self.absorb_abstentions();
 
             // A meltdown that already blew has to be resolved, not rounded
             // past - otherwise ending the vote is another way to delete it.
@@ -775,8 +776,12 @@ pub mod SignalRound {
         /// version — where the host simply named the team — could not claim.
         fn resolve_round(ref self: ContractState, host_seed: felt252, salt: felt252) {
             self.assert_host();
-            assert(self.phase.read() == phases::VOTE, 'not in vote phase');
-            assert(self.ballot_closed(), 'vote still open');
+            let phase = self.phase.read();
+            assert(phase == phases::VOTE || phase == phases::NIGHT, 'not in vote phase');
+            if phase == phases::VOTE {
+                assert(self.ballot_closed(), 'vote still open');
+                self.absorb_abstentions();
+            }
 
             // Shared with `resolve_sabotage` - two copies of a reveal is how
             // the two paths quietly drift apart.
@@ -855,9 +860,14 @@ pub mod SignalRound {
             // Surviving to the cap is a crew win: the impostors had every round
             // the game allows and failed to take the ship.
             let capped = round + 1 >= super::MAX_ROUNDS;
-            assert(
-                impostors_alive == 0 || impostors_won || tasks_won || capped, 'game not over',
-            );
+            if phase == phases::NIGHT {
+                // Night may only resolve here if the crew finished their jobs.
+                assert(tasks_won, 'game not over');
+            } else {
+                assert(
+                    impostors_alive == 0 || impostors_won || tasks_won || capped, 'game not over',
+                );
+            }
 
             // Equivalent to `impostors_alive == 0` in the two original cases —
             // the assert above rules out anything else — and it is what decides
@@ -1084,6 +1094,27 @@ pub mod SignalRound {
                 seat += 1;
             }
             alive
+        }
+
+        /// Uncast stakes become skips once the clock has run out.
+        ///
+        /// Votes are anonymous, so this cannot name who abstained — only how
+        /// many living stakes never arrived. Adding that remainder to the skip
+        /// pile is the same rule Among Us uses, and it is the only honest
+        /// encoding the contract has.
+        fn absorb_abstentions(ref self: ContractState) {
+            if get_block_timestamp() <= self.vote_deadline.read() {
+                return;
+            }
+            let alive: u256 = self.living_count().into();
+            let round = self.round_number.read();
+            let cast = self.total_votes_of.read(round);
+            if cast >= alive {
+                return;
+            }
+            let missing = alive - cast;
+            self.skip_tally_of.write(round, self.skip_tally_of.read(round) + missing);
+            self.total_votes_of.write(round, cast + missing);
         }
 
         /// Whether the ballot may be closed.

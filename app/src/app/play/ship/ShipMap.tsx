@@ -262,7 +262,7 @@ export function ShipMap({
               ? "You are alone here."
               : `With you: ${roomMates.map((x) => living.find((l) => l.seat === x)?.name).join(", ")}`}
         </span>
-        <span className={s.progressWrap} title="Crew tasks completed">
+        <span className={s.progressWrap} title="Fill this bar and the crew win — ghosts count">
           <span
             className={s.progressBar}
             style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }}
@@ -283,7 +283,7 @@ export function ShipMap({
         ) : (
           <span className={s.noTask}>
             {myTasks.every((t) => t.done)
-              ? "All your tasks are done — keep moving, or watch someone."
+              ? "Your list is done — ghosts still fill the shared bar, and a full bar wins."
               : "No task in this room. Head for a room with a dot."}
           </span>
         )}

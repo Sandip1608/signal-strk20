@@ -1,6 +1,6 @@
 import type { GameState, Seat } from "@/game/types";
 import { Phase } from "@/game/types";
-import { livingSeats, short } from "@/game/engine";
+import { livingSeats, short, isWinner } from "@/game/engine";
 import { CREW_NAME, IMPOSTOR_NAME, impostorLabel } from "@/game/variants";
 import { CrewCard, Crewmate } from "../ship/Crewmate";
 import { Ejection } from "../ship/Ejection";
@@ -113,17 +113,21 @@ export function PayoutStage({
   paid,
   onPayout,
   onReset,
+  resetLabel = "Return to lobby",
+  showEjection,
+  onEjectionDone,
 }: {
   game: GameState;
   paid: boolean;
   onPayout: () => void;
   onReset: () => void;
+  resetLabel?: string;
+  showEjection: boolean;
+  onEjectionDone: () => void;
 }) {
   const hidden = game.hiddenSeats;
   const hiddenObjs = game.seats.filter((x) => hidden.includes(x.seat));
-  const winners = game.seats.filter((x) =>
-    game.crewWon ? !hidden.includes(x.seat) && !x.dead : hidden.includes(x.seat),
-  );
+  const winners = game.seats.filter((x) => isWinner(game, x.seat));
   const share = winners.length ? potOf(game) / winners.length : 0;
   const ejected = game.ejected === 0 ? undefined : game.seats.find((x) => x.seat === game.ejected - 1);
 
@@ -143,7 +147,7 @@ export function PayoutStage({
         </h2>
         <p className={st.heroS}>
           {game.crewWon
-            ? "Hidden seats were ejected or outnumbered. The pot credits to living crew as shielded notes."
+            ? "The pot credits to every crewmate — living and dead — as shielded notes."
             : "Parity or sabotage. The pot routes to impostor nullifiers — never a public transfer."}
         </p>
         <div className={st.pills} style={{ justifyContent: "center", marginTop: 12 }}>
@@ -155,29 +159,35 @@ export function PayoutStage({
       <div className={st.podium}>
         {winners.slice(0, 3).map((x, i) => (
           <div key={x.seat} className={`${st.podCard} ${i === 0 ? st.podYou : ""}`}>
-            <Crewmate seat={x.seat} size={i === 0 ? 80 : 64} title={x.name} />
+            <Crewmate seat={x.seat} size={i === 0 ? 80 : 64} title={x.name} dead={x.dead} />
             <div className={st.roleSub} style={{ marginTop: 8 }}>
               {beanId(x.seat)} {x.name}
+              {x.dead ? " · ghost" : ""}
             </div>
             <div className={st.pay}>+{share.toFixed(2)} STRK</div>
           </div>
         ))}
       </div>
 
-      {/* A meltdown loss must not narrate the last ballot. Without this the
-          scene read "the vote tied, nobody went out the airlock" over a round
+      {/* A task win never went through the airlock, so skip the scene. A
+          meltdown must not narrate the last ballot as a tie either — without
+          `reactor` the caption read "nobody went out the airlock" over a round
           the airlock had nothing to do with. */}
-      <Ejection
-        reactor={game.endedBySabotage}
-        ejected={
-          game.endedBySabotage || !ejected ? null : { seat: ejected.seat, name: ejected.name }
-        }
-        caught={ejected !== undefined && hidden.includes(ejected.seat)}
-        hiddenLabelSingular={IMPOSTOR_NAME}
-        tied={!game.endedBySabotage && game.ejected === 0}
-        confirmEjects={game.confirmEjects}
-        final={{ crewWon: game.crewWon, teamNames: hiddenObjs.map((x) => x.name) }}
-      />
+      {showEjection && !(game.crewWon && game.ejected === 0) ? (
+        <Ejection
+          key={`eject-${game.roundNumber}-${game.ejected}`}
+          reactor={game.endedBySabotage}
+          ejected={
+            game.endedBySabotage || !ejected ? null : { seat: ejected.seat, name: ejected.name }
+          }
+          caught={ejected !== undefined && hidden.includes(ejected.seat)}
+          hiddenLabelSingular={IMPOSTOR_NAME}
+          tied={!game.endedBySabotage && game.ejected === 0}
+          confirmEjects={game.confirmEjects}
+          final={{ crewWon: game.crewWon, teamNames: hiddenObjs.map((x) => x.name) }}
+          onDone={onEjectionDone}
+        />
+      ) : null}
 
       <div className={st.split}>
         <aside className={st.card}>
@@ -199,7 +209,7 @@ export function PayoutStage({
                   : "Claim illicit STRK to shielded vault"}
             </button>
             <button type="button" className={`${s.btn} ${s.btnGhost}`} onClick={onReset}>
-              Return to lobby
+              {resetLabel}
             </button>
           </div>
           {paid && (
@@ -224,7 +234,9 @@ export function PayoutStage({
                     imp
                       ? IMPOSTOR_NAME.toLowerCase()
                       : game.crewWon
-                        ? `${CREW_NAME.toLowerCase()} · paid`
+                        ? x.dead
+                          ? "ghost · paid"
+                          : `${CREW_NAME.toLowerCase()} · paid`
                         : CREW_NAME.toLowerCase()
                   }
                 />

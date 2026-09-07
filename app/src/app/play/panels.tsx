@@ -7,7 +7,7 @@
  * is reached anyway.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import s from "./play.module.css";
 import { DeviceGate, useDeadline } from "./ui";
 import { ShipMap } from "./ship/ShipMap";
@@ -572,6 +572,14 @@ export function VotePanel({ game }: { game: GameState }) {
     secondsLeft: deadline.secondsLeft,
   };
 
+  // Clock ran out: uncast ballots become skips, then the round either ends or
+  // night falls again. Online rooms close this on the server poll instead, or
+  // every client would fire Continue.
+  useEffect(() => {
+    if (!deadline.passed || mode === "online") return;
+    continueRound();
+  }, [deadline.passed, mode, continueRound]);
+
   const living = livingSeats(game);
   const toVote = living.filter((x) => !x.hasVoted);
   // No further round can be opened past this point — see `MAX_ROUNDS`.
@@ -642,17 +650,23 @@ export function VotePanel({ game }: { game: GameState }) {
             type="button"
             className={s.btn}
             onClick={continueRound}
-            disabled={!voteClosed.passed}
+            disabled={!voteClosed.passed || (mode !== "online" && deadline.passed)}
           >
-            {voteClosed.passed ? "Continue (host)" : `Continue in ${voteClosed.secondsLeft}s`}
+            {deadline.passed
+              ? "Closing ballot…"
+              : voteClosed.passed
+                ? "Continue (host)"
+                : `Continue in ${voteClosed.secondsLeft}s`}
           </button>
           <span className={s.tagline}>
             {!voteClosed.passed
-              ? `${toVote.length} still to vote — or wait out the clock`
-              : atRoundCap
-                ? `Round ${game.roundNumber + 1} was the last — continuing opens the commitment. Surviving the cap is a crew win.`
+              ? `${toVote.length} still to vote — uncast ballots become skips when the clock runs out`
+              : deadline.passed
+                ? "Time's up. Uncast votes count as skip — opening the result."
                 : tasksDone
-                  ? "Every crew task is done — continuing will count them as a crew win."
+                ? "Every crew task is done — open the commitment and the contract will count them as a crew win."
+                : atRoundCap
+                  ? `Round ${game.roundNumber + 1} was the last — continuing will open the commitment and finish. Surviving the cap is a crew win.`
                   : everyoneVoted
                     ? "Everyone has voted. No need to wait for the clock."
                     : "Ballot closed. Continue: the contract opens the commitment if the game is decided, and deals another night if it is not."}
@@ -664,7 +678,7 @@ export function VotePanel({ game }: { game: GameState }) {
 }
 
 export function ResolvedPanel({ game }: { game: GameState }) {
-  const { payout, resetGame } = useGame();
+  const { payout, resetGame, ejectionDone, dismissEjection, mode, isHost } = useGame();
   const [paid, setPaid] = useState(false);
 
   return (
@@ -676,6 +690,9 @@ export function ResolvedPanel({ game }: { game: GameState }) {
         setPaid(true);
       }}
       onReset={resetGame}
+      resetLabel={mode === "online" && !isHost ? "Leave table" : "Return to lobby"}
+      showEjection={!ejectionDone}
+      onEjectionDone={dismissEjection}
     />
   );
 }
