@@ -561,8 +561,20 @@ export function resolveRound(
     if (hidden.has(x.seat)) impostorsAlive += 1;
     else crewAlive += 1;
   }
-  const crewWon = impostorsAlive === 0;
-  require_(crewWon || impostorsAlive >= crewAlive, "game not over");
+  const impostorsWon = impostorsAlive >= crewAlive;
+
+  // The round cap is itself a terminal condition — see the long note in
+  // `round.cairo::resolve_round`. Briefly: `endVote` refuses once the cap is
+  // reached and this guard refused any finish that was not already a win, so a
+  // table that got there with the impostors alive but not yet a majority had no
+  // legal move left and the stakes stayed locked. Surviving to the cap is a
+  // crew win.
+  const capped = state.roundNumber + 1 >= MAX_ROUNDS;
+  require_(impostorsAlive === 0 || impostorsWon || capped, "game not over");
+
+  // Equivalent to `impostorsAlive === 0` in the two original cases, since the
+  // guard above rules out anything else, and it is what decides a capped round.
+  const crewWon = !impostorsWon;
 
   return log(
     {

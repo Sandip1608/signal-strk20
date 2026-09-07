@@ -193,7 +193,14 @@ export type LogEntry = {
  */
 export const SKIP_VOTE = 0xffffffff;
 
-/** `round.cairo::MAX_ROUNDS` - the stall cap on the host-driven loop. */
+/**
+ * `round.cairo::MAX_ROUNDS` - the stall cap on the host-driven loop.
+ *
+ * Permits 9 completed rounds, not 10: `endVote` asserts
+ * `roundNumber + 1 < MAX_ROUNDS` and rounds count from 0. Reaching the cap is
+ * terminal — `resolveRound` accepts it as a crew win — so it ends the game
+ * rather than stranding it.
+ */
 export const MAX_ROUNDS = 10;
 
 /** The buy-in / vote weight unit. One seat, one vote of equal weight in v1. */

@@ -277,16 +277,27 @@ mod tests {
     /// this is the check that makes that choice honest rather than trusted -
     /// getting it wrong would let a host end on whichever round suited them.
     fn game_over(impostors_alive: u32, crew_alive: u32) -> bool {
-        impostors_alive == 0 || impostors_alive >= crew_alive
+        // Round 0: the cap is nowhere near, so this is the mid-game rule.
+        game_over_at(impostors_alive, crew_alive, 0)
     }
-    fn crew_won(impostors_alive: u32) -> bool {
+
+    /// The full rule, including the round cap. `end_vote` refuses to start a
+    /// round once `round + 1 == MAX_ROUNDS`, so if this did not also accept
+    /// that point as terminal there would be no legal move left at all.
+    fn game_over_at(impostors_alive: u32, crew_alive: u32, round: u32) -> bool {
         impostors_alive == 0
+            || impostors_alive >= crew_alive
+            || round + 1 >= signal::round::MAX_ROUNDS
+    }
+
+    fn crew_won(impostors_alive: u32, crew_alive: u32) -> bool {
+        !(impostors_alive >= crew_alive)
     }
 
     #[test]
     fn all_impostors_gone_is_a_crew_win() {
         assert(game_over(0, 3), 'should be over');
-        assert(crew_won(0), 'crew should win');
+        assert(crew_won(0, 3), 'crew should win');
     }
 
     #[test]
@@ -294,13 +305,13 @@ mod tests {
         // 1 impostor vs 1 crew: the impostor cannot be out-voted, so Among Us
         // stops here rather than playing a decided round.
         assert(game_over(1, 1), 'should be over');
-        assert(!crew_won(1), 'impostor should win');
+        assert(!crew_won(1, 1), 'impostor should win');
     }
 
     #[test]
     fn impostors_outnumbering_crew_ends_it() {
         assert(game_over(2, 1), 'should be over');
-        assert(!crew_won(2), 'impostor should win');
+        assert(!crew_won(2, 1), 'impostor should win');
     }
 
     #[test]
@@ -324,6 +335,45 @@ mod tests {
         assert(!game_over(2, 3), 'k=2 n=5 already over');
         // 3 impostors, 7 players
         assert(!game_over(3, 4), 'k=3 n=7 already over');
+    }
+
+    /// The bug this closes: a table that reached the cap with the impostors
+    /// alive but not yet a majority satisfied neither guard. `end_vote` refused
+    /// ('too many rounds') and `resolve_round` refused ('game not over'), so the
+    /// round was stuck for good and the escrowed buy-ins with it.
+    #[test]
+    fn reaching_the_round_cap_ends_the_game() {
+        let last = signal::round::MAX_ROUNDS - 1;
+        // 1 impostor still alive among 4 crew - not a win by either rule.
+        assert(!game_over_at(1, 4, last - 1), 'not over one round earlier');
+        assert(game_over_at(1, 4, last), 'cap must end it');
+    }
+
+    /// Surviving every round the game allows is a crew win: the impostors had
+    /// their chances and did not take the ship.
+    #[test]
+    fn surviving_to_the_cap_is_a_crew_win() {
+        assert(crew_won(1, 4), 'crew survived the cap');
+    }
+
+    /// The cap must not hand the round to the crew when the impostors have
+    /// actually won on it - a majority still decides.
+    #[test]
+    fn the_cap_does_not_rescue_a_lost_crew() {
+        assert(game_over_at(2, 1, signal::round::MAX_ROUNDS - 1), 'should be over');
+        assert(!crew_won(2, 1), 'impostors took the ship');
+    }
+
+    /// And the cap must not become a general escape hatch: before it, an
+    /// undecided game is still refused, which is what stops a host resolving on
+    /// whichever round happens to suit them.
+    #[test]
+    fn the_cap_does_not_let_a_host_finish_early() {
+        let mut r: u32 = 0;
+        while r + 1 < signal::round::MAX_ROUNDS {
+            assert(!game_over_at(1, 4, r), 'early finish allowed');
+            r += 1;
+        }
     }
 
     #[test]

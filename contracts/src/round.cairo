@@ -131,6 +131,12 @@ pub const SKIP_VOTE: u32 = 0xffffffff;
 /// condition without learning the roles, which is the whole point of the
 /// commitment). `resolve_round` verifies that call was honest — but nothing
 /// stops a host simply never calling it, so the loop needs a ceiling.
+///
+/// Note the arithmetic: `end_vote` asserts `round + 1 < MAX_ROUNDS` and rounds
+/// count from 0, so this permits **9** completed rounds and the game comes to
+/// rest at `round_number == MAX_ROUNDS - 1`. That resting point is terminal —
+/// `resolve_round` accepts it as a crew win — so the ceiling is a real ending
+/// rather than a wall the round can get pinned against.
 pub const MAX_ROUNDS: u32 = 10;
 
 /// Seconds the crew have to reach the reactor before it melts down.
@@ -716,9 +722,27 @@ pub mod SignalRound {
                 seat += 1;
             }
 
-            let crew_won = impostors_alive == 0;
             let impostors_won = impostors_alive >= crew_alive;
-            assert(crew_won || impostors_won, 'game not over');
+
+            // The round cap is itself a terminal condition.
+            //
+            // Without this the two guards contradicted each other: `end_vote`
+            // refuses once `round + 1 == MAX_ROUNDS`, and this assert refused
+            // any finish that was not already a win — so a table that reached
+            // the cap with the impostors alive but not yet a majority had no
+            // legal move left at all, and the escrowed buy-ins stayed locked
+            // for good. Reachable with a cautious impostor and a table that
+            // keeps skipping; nine rounds is not many when nobody has evidence.
+            //
+            // Surviving to the cap is a crew win: the impostors had every round
+            // the game allows and failed to take the ship.
+            let capped = round + 1 >= super::MAX_ROUNDS;
+            assert(impostors_alive == 0 || impostors_won || capped, 'game not over');
+
+            // Equivalent to `impostors_alive == 0` in the two original cases —
+            // the assert above rules out anything else — and it is what decides
+            // a capped round.
+            let crew_won = !impostors_won;
 
             self.ejected.write(ejected);
             self.impostor.write(*hidden_seats.at(0) + 1);

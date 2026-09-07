@@ -19,7 +19,7 @@ prove.
 
 | | Status |
 |---|---|
-| Cairo contracts (`SignalRound`, `SignalEscrow`) | compile; 46 unit tests pass |
+| Cairo contracts (`SignalRound`, `SignalEscrow`) | compile; 50 unit tests pass |
 | Provably-fair role assignment from a multi-party seed | **done, on-chain** |
 | Night actions — impostor kills **and seer checks** | **done** (simulated, see below) |
 | Turn progression + resolution | **done, on-chain** |
@@ -197,7 +197,7 @@ include `SignalEscrow`.
 contracts/src/
   round.cairo          state machine + derive_hidden; zero pool coupling
   signal_escrow.cairo  the only pool-facing surface; stateless between calls
-  tests.cairo          46 unit tests
+  tests.cairo          50 unit tests
 app/src/
   game/                engine (mirrors the contract), ship, bots, crypto
   server/rooms.ts      cross-device relay, redacted per viewer

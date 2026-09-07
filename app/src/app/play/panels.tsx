@@ -16,7 +16,7 @@ import { Ejection } from "./ship/Ejection";
 import { ownDeviceSeat, useGame } from "@/game/store";
 import { ROOM_BY_ID, sightingsFor, tasksComplete } from "@/game/ship";
 import { ballotClosed, livingSeats, short } from "@/game/engine";
-import { SKIP_VOTE, type GameState, type Seat } from "@/game/types";
+import { MAX_ROUNDS, SKIP_VOTE, type GameState, type Seat } from "@/game/types";
 import { CREW_NAME, IMPOSTOR_NAME, impostorLabel } from "@/game/variants";
 
 // ── Lobby ──────────────────────────────────────────────────────────────────
@@ -465,6 +465,8 @@ export function VotePanel({ game }: { game: GameState }) {
 
   const living = livingSeats(game);
   const toVote = living.filter((x) => !x.hasVoted);
+  // No further round can be opened past this point — see `MAX_ROUNDS`.
+  const atRoundCap = game.roundNumber + 1 >= MAX_ROUNDS;
   const rawViewer = viewerSeat === null ? null : game.seats.find((x) => x.seat === viewerSeat);
   // Same reason as the role card: on a screen pinned to one player, having
   // voted (or being dead) is what returns you to the tally, since the viewer
@@ -592,9 +594,15 @@ export function VotePanel({ game }: { game: GameState }) {
           type="button"
           className={`${s.btn} ${s.btnGhost}`}
           onClick={endVote}
-          disabled={!voteClosed.passed}
+          // `end_vote` refuses to open a round past the cap, so offering the
+          // button there could only ever revert.
+          disabled={!voteClosed.passed || atRoundCap}
         >
-          {voteClosed.passed ? "Next round (host)" : `Next round in ${voteClosed.secondsLeft}s`}
+          {atRoundCap
+            ? "Last round played"
+            : voteClosed.passed
+              ? "Next round (host)"
+              : `Next round in ${voteClosed.secondsLeft}s`}
         </button>
         <button type="button" className={s.btn} onClick={resolve} disabled={!voteClosed.passed}>
           {voteClosed.passed
@@ -606,9 +614,14 @@ export function VotePanel({ game }: { game: GameState }) {
             ? // The host actions assert `ballot_closed()`, so they stay disabled
               // rather than firing a call that can only revert.
               `${toVote.length} still to vote — or wait out the clock`
-            : everyoneVoted
-              ? "Everyone has voted. No need to wait for the clock."
-              : "Ballot closed. Play on, or open the commitment to finish — resolving before the game is actually over is rejected."}
+            : atRoundCap
+              ? // Reaching the cap is itself terminal: the impostors had every
+                // round the game allows. Resolve is the only move left, and it
+                // is now a legal one.
+                `Round ${game.roundNumber + 1} was the last. Open the commitment to finish — surviving the cap is a crew win.`
+              : everyoneVoted
+                ? "Everyone has voted. No need to wait for the clock."
+                : "Ballot closed. Play on, or open the commitment to finish — resolving before the game is actually over is rejected."}
         </span>
       </div>
     </div>
