@@ -11,16 +11,8 @@
     "0x7ff70d7949fdff7e8ffd750b4f5e876bde6570a09ed24069a8677e5f798c1d4"
   ],
   "contracts": [
-    {
-      "name": "SignalRound",
-      "address": "0x13ea00a52a5dc531430b4ddc492d2c9da8c187b7a49d96c86df2771c301d9ce",
-      "class_hash": "0x230b0869825a7949a8d468c0c6fd90cd4d6fa64653b0d70eabf9f937e7e976e"
-    },
-    {
-      "name": "SignalEscrow",
-      "address": "0x21006bb87b736db531088782b42ad7eb9d37d1f373c438634625bbe484275cf",
-      "class_hash": "0x753e5400760c07bee7f64a18eb200b97d8e03f140ae7aa612d0e53b02dd1554"
-    }
+    "0x13ea00a52a5dc531430b4ddc492d2c9da8c187b7a49d96c86df2771c301d9ce",
+    "0x21006bb87b736db531088782b42ad7eb9d37d1f373c438634625bbe484275cf"
   ],
   "demo_video": "https://drive.google.com/file/d/15z-YvauYw1JITo4tW8u9LKNzK8WKVgAQ/view?usp=sharing",
   "demo_url": "https://signal-strk20.onrender.com",
