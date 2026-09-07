@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Fragment, useEffect, useState } from "react";
 import s from "./play.module.css";
-import { short } from "@/game/engine";
+import { livingSeats, short } from "@/game/engine";
 import { Phase, type GameState, type LogEntry, type PhaseValue, type Seat } from "@/game/types";
 
 /**
@@ -62,11 +63,101 @@ const PHASE_CLASS: Record<PhaseValue, string> = {
 
 const PHASE_TEXT: Record<PhaseValue, string> = {
   [Phase.LOBBY]: "Lobby",
-  [Phase.ASSIGNED]: "Roles assigned",
+  [Phase.ASSIGNED]: "Reveal",
   [Phase.NIGHT]: "Night",
   [Phase.VOTE]: "Vote",
-  [Phase.RESOLVED]: "Resolved",
+  [Phase.RESOLVED]: "Resolve",
 };
+
+const PHASE_STEPS: { id: PhaseValue | "payout"; label: string }[] = [
+  { id: Phase.LOBBY, label: "Lobby" },
+  { id: Phase.ASSIGNED, label: "Reveal" },
+  { id: Phase.NIGHT, label: "Night" },
+  { id: Phase.VOTE, label: "Vote" },
+  { id: Phase.RESOLVED, label: "Resolve" },
+  { id: "payout", label: "Payout" },
+];
+
+/** Conceptual buy-in shown in the HUD — the contract does not store a stake amount. */
+export const STAKE_STRK = 50;
+
+export function GameHud({
+  game,
+  roomCode,
+  viewerName,
+  viewerTag,
+  onLeave,
+}: {
+  game: GameState | null;
+  roomCode?: string | null;
+  viewerName?: string | null;
+  viewerTag?: string | null;
+  onLeave?: () => void;
+}) {
+  const phase = game?.phase ?? Phase.LOBBY;
+  const living = game ? livingSeats(game).length : 0;
+  const filled = game?.seats.length ?? 0;
+  const pot = filled * STAKE_STRK;
+
+  return (
+    <header className={s.hud}>
+      <div className={s.brand}>
+        <div className={s.brandMark} aria-hidden>
+          ⌖<span className={s.brandPulse} />
+        </div>
+        <div className={s.brandMeta}>
+          <h1 className={s.logo}>
+            Signal<span className={s.logoDot}>.</span>
+            <span className={s.zkPill}>ZK-Mafia</span>
+          </h1>
+          <span className={s.tagline}>STRK20 privacy pool</span>
+        </div>
+      </div>
+
+      <nav className={s.phaseTrack} aria-label="Round phases">
+        {PHASE_STEPS.map((step, i) => {
+          const active =
+            step.id === "payout" ? phase === Phase.RESOLVED : step.id === phase;
+          const done =
+            step.id !== "payout" && typeof step.id === "number" && phase > step.id;
+          return (
+            <Fragment key={step.label}>
+              {i > 0 && <span className={s.stepRail} aria-hidden />}
+              <span className={`${s.step} ${active ? s.stepActive : done ? s.stepDone : ""}`}>
+                {step.label}
+                {active && step.id === Phase.VOTE ? " · live" : ""}
+              </span>
+            </Fragment>
+          );
+        })}
+      </nav>
+
+      <div className={s.hudStats}>
+        <div className={s.stat}>
+          <span className={`${s.statVal} ${s.statValGold}`}>Pool: {pot.toLocaleString()} STRK</span>
+          <span className={s.statSub}>
+            Anon-set: {filled ? `${Math.round((living / Math.max(filled, 1)) * 100)}%` : "—"}
+            {filled ? ` (${living}/${filled})` : ""}
+          </span>
+        </div>
+        {viewerName && (
+          <div className={s.youChip}>
+            <span className={s.youName}>{viewerName}</span>
+            <span className={s.youTag}>{viewerTag ?? "burner session"}</span>
+          </div>
+        )}
+        {roomCode && onLeave && (
+          <button type="button" className={`${s.btn} ${s.btnGhost}`} onClick={onLeave}>
+            Leave
+          </button>
+        )}
+        <Link href="/" className={s.backLink}>
+          Wallet →
+        </Link>
+      </div>
+    </header>
+  );
+}
 
 export function PhaseBanner({ game, children }: { game: GameState; children?: React.ReactNode }) {
   return (

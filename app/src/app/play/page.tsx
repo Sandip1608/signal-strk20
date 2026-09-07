@@ -13,10 +13,9 @@
  * thing that has to change.
  */
 
-import Link from "next/link";
 import { useState } from "react";
 import s from "./play.module.css";
-import { ActivityLog, PhaseBanner } from "./ui";
+import { ActivityLog, GameHud, PhaseBanner } from "./ui";
 import { LobbyPanel, NightPanel, ResolvedPanel, RolePanel, VotePanel } from "./panels";
 import { useGame } from "@/game/store";
 import { useBotDriver } from "@/game/useBotDriver";
@@ -58,8 +57,10 @@ const PACES = [
 ] as const;
 
 export default function PlayPage() {
-  const { game, error, clearError, newGame, mode, roomCode, hostRoom, joinRoom, leaveRoom, connecting } =
-    useGame();
+  const {
+    game, error, clearError, newGame, mode, roomCode, hostRoom, joinRoom, leaveRoom,
+    connecting, viewerSeat, mySeat,
+  } = useGame();
 
   // Local rounds drive bots in the browser; online rounds let the server do it
   // once for everybody, or every client would fight over the same bot turn.
@@ -69,19 +70,20 @@ export default function PlayPage() {
   // them tap through a gate meant for a shared screen.
   useOwnDevice();
 
+  const you =
+    (viewerSeat !== null ? game?.seats.find((x) => x.seat === viewerSeat) : null) ??
+    (mySeat !== null ? game?.seats.find((x) => x.seat === mySeat) : null);
+
   return (
     <div className={s.shell}>
+      <GameHud
+        game={game}
+        roomCode={roomCode}
+        viewerName={you?.name ?? null}
+        viewerTag={you ? `Bean #${String(you.seat + 1).padStart(2, "0")}` : null}
+        onLeave={leaveRoom}
+      />
       <div className={s.inner}>
-        <header className={s.top}>
-          <h1 className={s.logo}>
-            Signal<span className={s.logoDot}>.</span>
-          </h1>
-          <span className={s.tagline}>Hidden roles · anonymous votes · shielded payout</span>
-          <Link href="/" className={s.backLink}>
-            STRK20 wallet →
-          </Link>
-        </header>
-
         {error && (
           <div className={s.error} role="alert">
             <span className={s.errorCode}>reverted:</span>
@@ -121,10 +123,10 @@ export default function PlayPage() {
             <div className={s.grid}>
               <div>{phasePanel(game)}</div>
               <aside className={s.panel}>
-                <h2 className={s.panelTitle}>Activity</h2>
+                <h2 className={s.panelTitle}>Commitment ledger</h2>
                 <p className={s.panelHint} style={{ marginBottom: 14 }}>
                   Each entry names the call behind it. A{" "}
-                  <span style={{ color: "#9b7bff" }}>●</span> marks an action that never appears in
+                  <span style={{ color: "#c77dff" }}>●</span> marks an action that never appears in
                   public state.
                 </p>
                 <ActivityLog log={game.log} />
@@ -278,10 +280,11 @@ function StartScreen({
 
   return (
     <div className={s.panel}>
-      <h2 className={s.panelTitle}>On-chain Among Us</h2>
+      <h2 className={s.panelTitle}>Assemble the table</h2>
       <p className={s.panelHint}>
-One round aboard the ship. Roles are encrypted notes only their holder can decrypt. The night kill is a private transfer. Votes are anonymous transfers
-        with a publicly computable tally. The payout is a shielded credit — never a public transfer.
+        One round of shielded social deduction. Roles arrive as encrypted notes only their holder
+        can decrypt. The night kill is a private transfer. Votes are anonymous transfers with a
+        publicly computable tally. The payout is a shielded credit — never a public transfer.
       </p>
 
       <div className={s.section}>

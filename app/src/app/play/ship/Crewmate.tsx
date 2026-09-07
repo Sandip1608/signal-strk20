@@ -13,7 +13,7 @@ import s from "./crewmate.module.css";
 
 /** Stable per-seat colour, so a player looks the same all round. */
 const CREW_COLOURS = [
-  "#ff4d5e", "#35d9c4", "#f5c451", "#7f8bff", "#b78bff", "#4fd06a", "#ff9f43",
+  "#ef4444", "#3b82f6", "#06b6d4", "#ec4899", "#84cc16", "#f97316", "#eab308", "#a855f7",
 ];
 export const crewColour = (seat: number) => CREW_COLOURS[seat % CREW_COLOURS.length];
 

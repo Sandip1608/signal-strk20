@@ -39,8 +39,8 @@
   transition: background 0.14s, border-color 0.14s, transform 0.1s;
 }
 .cardBtn:hover:not(:disabled) {
-  background: #171826;
-  border-color: #3d4166;
+  background: #161926;
+  border-color: #9d4edd;
   transform: translateY(-2px);
 }
 .cardBtn:hover:not(:disabled) .mate {
@@ -52,8 +52,8 @@
 }
 
 .cardSelected {
-  background: #12241f;
-  border-color: #35d9c4;
+  background: rgba(157, 78, 221, 0.16);
+  border-color: #c77dff;
 }
 
 .name {
@@ -69,5 +69,5 @@
   font-size: 10.5px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #8b8da8;
+  color: #94a3b8;
 }

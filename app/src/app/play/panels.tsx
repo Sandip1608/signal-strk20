@@ -9,9 +9,9 @@
 
 import { useState } from "react";
 import s from "./play.module.css";
-import { DeviceGate, KeyValue, Tally, useDeadline } from "./ui";
+import { DeviceGate, KeyValue, STAKE_STRK, Tally, useDeadline } from "./ui";
 import { ShipMap } from "./ship/ShipMap";
-import { CrewCard } from "./ship/Crewmate";
+import { CrewCard, Crewmate } from "./ship/Crewmate";
 import { Ejection } from "./ship/Ejection";
 import { ownDeviceSeat, useGame } from "@/game/store";
 import { ROOM_BY_ID, sightingsFor, tasksComplete } from "@/game/ship";
@@ -148,10 +148,19 @@ export function RolePanel({ game }: { game: GameState }) {
     const impostor = viewer.role === "IMPOSTOR";
     return (
       <div className={s.panel}>
-        <h2 className={s.panelTitle}>Your role</h2>
+        <h2 className={s.panelTitle}>Decryption ceremony</h2>
+        <p className={s.panelHint}>
+          Assignment note opened locally. Only this seat&apos;s viewing key can read it.
+        </p>
         <div className={`${s.roleCard} ${impostor ? s.roleImpostor : s.roleCrew}`}>
-          <p className={s.roleLabel}>Decrypted note · seat {viewer.seat}</p>
-          <p className={s.roleName}>{viewer.role}</p>
+          <span className={s.seal} aria-hidden>🔒</span>
+          <Crewmate seat={viewer.seat} size={88} title={viewer.name} />
+          <p className={s.roleLabel}>
+            {impostor ? "Sealed envelope · impostor" : "Commendation note"} · seat {viewer.seat}
+          </p>
+          <p className={s.roleName}>
+            {impostor ? IMPOSTOR_NAME : viewer.role === "SEER" ? "SEER" : CREW_NAME}
+          </p>
           <p className={s.roleBlurb}>
             {impostor
               ? "Tonight you transfer the kill note to one player, privately, inside the pool. Nobody sees the sender — not even the round contract."
@@ -159,6 +168,24 @@ export function RolePanel({ game }: { game: GameState }) {
                 ? "You are crew, but once each night you may check one player and learn whether they are an impostor. The answer is yours alone — the table only hears it if you say it."
                 : "Survive the night, then vote out the impostor. Your vote is anonymous; only the tally is public."}
           </p>
+          {impostor && (
+            <div className={s.perkList}>
+              <div className={s.perk}>
+                <div className={s.perkName}>Night kill</div>
+                <div className={s.perkHint}>Private transfer — only from the same room, after cooldown.</div>
+              </div>
+              <div className={s.perk}>
+                <div className={s.perkName}>Vents &amp; sabotage</div>
+                <div className={s.perkHint}>Untraceable travel, lights out, reactor meltdown.</div>
+              </div>
+            </div>
+          )}
+          <div className={s.enclave}>
+            <p className={s.enclaveLabel}>Client-side proof enclave · private to you</p>
+            <KeyValue k="Burner session" v={short(viewer.sessionKey)} />
+            <KeyValue k="Payout note" v={short(viewer.payoutNoteId)} />
+            <KeyValue k="Shielded bond" v={`${STAKE_STRK}.00 STRK`} />
+          </div>
         </div>
         <button
           type="button"
@@ -168,7 +195,7 @@ export function RolePanel({ game }: { game: GameState }) {
             cover();
           }}
         >
-          Got it — hide and pass on
+          Commit &amp; seal role
         </button>
       </div>
     );
@@ -267,7 +294,8 @@ export function NightPanel({ game }: { game: GameState }) {
   // vote. Until then the contract knows nothing about the kill.
   if (victim && !victim.dead && (own === null || victim.seat === own)) {
     return (
-      <div className={s.panel}>
+      <div className={`${s.panel} ${s.alarm}`}>
+        <p className={s.alarmBanner}>Emergency · body report</p>
         <h2 className={s.panelTitle}>A note arrived</h2>
         <p className={s.panelHint}>
           The kill note moved inside the pool. Only its recipient can decrypt it — the round
@@ -282,6 +310,7 @@ export function NightPanel({ game }: { game: GameState }) {
         ) : (
           <>
             <div className={`${s.roleCard} ${s.roleImpostor}`}>
+              <Crewmate seat={victim.seat} size={72} dead title={victim.name} />
               <p className={s.roleLabel}>Decrypted note</p>
               <p className={s.roleName}>YOU DIED</p>
               <p className={s.roleBlurb}>
@@ -291,7 +320,7 @@ export function NightPanel({ game }: { game: GameState }) {
             </div>
             <button
               type="button"
-              className={s.btn}
+              className={`${s.btn} ${s.btnDanger}`}
               onClick={() => {
                 report(victim.seat);
                 cover();
@@ -322,7 +351,9 @@ export function NightPanel({ game }: { game: GameState }) {
     const isImpostor = viewer.role === "IMPOSTOR";
     return (
       <div className={s.panel}>
-          <h2 className={s.panelTitle}>{isImpostor ? "The deck — find someone alone" : "The deck"}</h2>
+          <h2 className={s.panelTitle}>
+            {isImpostor ? "Night shroud — target picker" : "Night shroud — eyes closed"}
+          </h2>
         <p className={s.panelHint}>
           {viewer.dead
             ? "You are a ghost. You can still finish your tasks, but nobody can see you and you cannot vote."
@@ -456,7 +487,7 @@ export function VotePanel({ game }: { game: GameState }) {
   if (viewer && revealed) {
     return (
       <div className={s.panel}>
-        <h2 className={s.panelTitle}>{viewer.name} — vote to eject</h2>
+        <h2 className={s.panelTitle}>{viewer.name} — cast a shielded vote</h2>
         <p className={s.panelHint}>
           Your stake is withdrawn to the escrow through <code>privacy_invoke</code>. The escrow
           reports only <code>(candidate, amount)</code> to the tally; you stay inside the pool&apos;s
@@ -480,7 +511,7 @@ export function VotePanel({ game }: { game: GameState }) {
                     ? viewer.checks[x.seat]
                       ? "you checked — IMPOSTOR"
                       : "you checked — clear"
-                    : "vote to eject"
+                    : "cast nullifier"
                 }
               />
             ))}
@@ -512,7 +543,7 @@ export function VotePanel({ game }: { game: GameState }) {
 
   return (
     <div className={s.panel}>
-      <h2 className={s.panelTitle}>Vote</h2>
+      <h2 className={s.panelTitle}>Discussion &amp; vote table</h2>
       <p className={s.panelHint}>
         {game.nightVictim === 0
           ? "Nobody was reported dead. Vote anyway."
@@ -520,37 +551,40 @@ export function VotePanel({ game }: { game: GameState }) {
         Living players vote once each.
       </p>
 
-      <div className={s.crewRow}>
-        {game.seats.map((x) => (
-          <CrewCard
-            key={x.seat}
-            seat={x.seat}
-            name={x.name}
-            dead={x.dead}
-            faded={x.hasVoted}
-            onClick={() => setViewer(x.seat)}
-            disabled={x.dead || x.hasVoted || x.isBot}
-            tag={
-              x.dead
-                ? "dead"
-                : x.hasVoted
-                  ? "voted"
-                  : x.isBot
-                    ? "deciding…"
-                    : "tap to vote"
-            }
-          />
-        ))}
-      </div>
+      <div className={s.tableWrap}>
+        <div className={s.orbit}>
+          <div className={s.orbitCore}>Nullifier circuit active</div>
+          {game.seats.map((x) => (
+            <CrewCard
+              key={x.seat}
+              seat={x.seat}
+              name={x.name}
+              dead={x.dead}
+              faded={x.hasVoted}
+              onClick={() => setViewer(x.seat)}
+              disabled={x.dead || x.hasVoted || x.isBot}
+              tag={
+                x.dead
+                  ? "dead"
+                  : x.hasVoted
+                    ? "voted"
+                    : x.isBot
+                      ? "deciding…"
+                      : "tap to vote"
+              }
+            />
+          ))}
+        </div>
 
-      <div className={s.section}>
-        <h3 className={s.panelTitle} style={{ fontSize: 14, marginBottom: 8 }}>
-          Live tally
-        </h3>
-        <Tally game={game} />
-        <p className={s.tagline} style={{ display: "block", marginTop: 6 }}>
-          Skip: {String(game.skipTally)} — nobody is ejected unless one player beats this.
-        </p>
+        <div className={s.section} style={{ marginTop: 0 }}>
+          <h3 className={s.panelTitle} style={{ fontSize: 14, marginBottom: 8 }}>
+            Public tally ledger
+          </h3>
+          <Tally game={game} />
+          <p className={s.tagline} style={{ display: "block", marginTop: 6 }}>
+            Skip: {String(game.skipTally)} — nobody is ejected unless one player beats this.
+          </p>
+        </div>
       </div>
 
       <div className={s.btnRow}>
@@ -668,6 +702,17 @@ export function ResolvedPanel({ game }: { game: GameState }) {
 
   return (
     <div className={s.panel}>
+      <div className={`${s.victory} ${game.crewWon ? s.victoryCrew : s.victoryImpostor}`}>
+        <p className={s.victoryKicker}>Phase 07 · escrow settlement</p>
+        <p className={s.victoryTitle}>
+          {game.crewWon ? "Crew victory" : "Impostor victory"}
+        </p>
+        <p className={s.victorySub}>
+          {game.crewWon
+            ? "The hidden seats were ejected or outnumbered. The pot credits to living crew as shielded notes."
+            : "Parity or sabotage. The pot routes to impostor nullifiers — never a public transfer."}
+        </p>
+      </div>
       <Ejection
         ejected={ejected ? { seat: ejected.seat, name: ejected.name } : null}
         caught={ejected !== undefined && hidden.includes(ejected.seat)}

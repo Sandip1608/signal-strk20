@@ -22,7 +22,7 @@
   background:
     repeating-linear-gradient(45deg, #0e0f1b 0 6px, #0b0c15 6px 12px),
     linear-gradient(180deg, #0d0e18, #0a0b13);
-  border: 1px solid #24263a;
+  border: 1px solid #23283b;
   box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.6);
 }
 
@@ -74,7 +74,7 @@
   min-height: 112px;
   padding: 10px 10px 14px;
   border-radius: 10px;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, #24263a);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, #23283b);
   /* Floor panelling, tinted by the room's accent — the single biggest thing
      that stops six dark rectangles reading as six cards in a list. */
   background:
@@ -226,7 +226,7 @@
   padding: 10px 13px;
   border-radius: 10px;
   background: #171826;
-  border: 1px solid #24263a;
+  border: 1px solid #23283b;
   font-size: 12.5px;
 }
 .statusRoom { font-weight: 700; }
@@ -239,7 +239,7 @@
   height: 7px;
   border-radius: 999px;
   background: #0c0d16;
-  border: 1px solid #24263a;
+  border: 1px solid #23283b;
   overflow: hidden;
 }
 .progressBar {
@@ -275,7 +275,7 @@
   cursor: pointer;
   transition: filter 0.15s, transform 0.08s;
 }
-.primary { background: #35d9c4; color: #06231e; }
+.primary { background: #9d4edd; color: #fff; }
 .kill { background: #ff4d5e; color: #2a0009; }
 .primary:hover, .kill:hover { filter: brightness(1.08); }
 .primary:active, .kill:active { transform: scale(0.985); }
