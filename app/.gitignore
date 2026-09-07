@@ -38,7 +38,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 /scripts-ts-node/
-package-lock.json
+# package-lock.json is deliberately NOT ignored. The starter kit ignored it,
+# which meant a fresh clone had no lockfile — so `npm ci` refused to run at all
+# ("can only install with an existing package-lock.json") and the Render build
+# exited 1. Committing it is also the only way the deployed build matches what
+# was tested here.
 A1priv/A1priv.ts
 /A1priv/
 
