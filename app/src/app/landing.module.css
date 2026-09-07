@@ -1,0 +1,304 @@
+/*
+ * Landing: Among Us night sky in Starknet colours.
+ *
+ * The starfield is two repeating radial-gradient layers (the Ejection scene's
+ * trick) — zero DOM per star. Crewmates are the game's own inline-SVG figure,
+ * floated on keyframes; far ones are blurred for depth. One CTA, as asked.
+ */
+
+.page {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  color: #e2e8f0;
+  background:
+    radial-gradient(ellipse 120% 70% at 50% -10%, #1b2447 0%, transparent 60%),
+    radial-gradient(ellipse 80% 60% at 85% 100%, #2a1530 0%, transparent 55%),
+    linear-gradient(180deg, #070a18 0%, #0b1020 55%, #05070f 100%);
+}
+
+.page::before,
+.page::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-repeat: repeat;
+}
+
+/* near stars — brighter, sparser */
+.page::before {
+  background-image:
+    radial-gradient(1.6px 1.6px at 22px 34px, #ffffffcc 50%, transparent 51%),
+    radial-gradient(1.4px 1.4px at 180px 120px, #ffd9b8aa 50%, transparent 51%),
+    radial-gradient(1.8px 1.8px at 310px 60px, #ffffffbb 50%, transparent 51%),
+    radial-gradient(1.2px 1.2px at 95px 210px, #b8d0ff99 50%, transparent 51%);
+  background-size: 380px 260px;
+  animation: drift 90s linear infinite;
+}
+
+/* far stars — dimmer, denser */
+.page::after {
+  background-image:
+    radial-gradient(1px 1px at 10px 10px, #ffffff55 50%, transparent 51%),
+    radial-gradient(1px 1px at 60px 90px, #ffffff44 50%, transparent 51%),
+    radial-gradient(1px 1px at 130px 40px, #ffffff4d 50%, transparent 51%),
+    radial-gradient(1px 1px at 90px 150px, #ffffff33 50%, transparent 51%);
+  background-size: 180px 170px;
+  animation: drift 160s linear infinite reverse;
+}
+
+@keyframes drift {
+  from { background-position: 0 0; }
+  to { background-position: -380px 130px; }
+}
+
+.nav {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 1080px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px 24px 0;
+}
+
+.wordmark {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.34em;
+  color: #f8fafc;
+}
+
+.wordmark span {
+  color: #ff7a4f;
+}
+
+.navTag {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  border: 1px solid #334155;
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: #0f172a66;
+}
+
+.hero {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 48px 20px 24px;
+  max-width: 760px;
+}
+
+.kicker {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: #ff9d73;
+  margin: 0 0 14px;
+}
+
+.title {
+  margin: 0;
+  font-size: clamp(64px, 12vw, 128px);
+  line-height: 0.95;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  color: #f8fafc;
+  text-shadow:
+    0 0 26px #ff7a4f40,
+    0 0 90px #ff7a4f26;
+}
+
+.sub {
+  margin: 20px auto 0;
+  max-width: 560px;
+  font-size: 16px;
+  line-height: 1.6;
+  color: #a7b3c9;
+}
+
+.sub strong {
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+.cta {
+  margin-top: 36px;
+  border: 0;
+  cursor: pointer;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #fff7ed;
+  padding: 18px 46px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ff7a4f 0%, #f04438 100%);
+  box-shadow:
+    0 10px 34px #f0443855,
+    inset 0 1px 0 #ffffff40;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cta:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow:
+    0 16px 44px #f0443870,
+    inset 0 1px 0 #ffffff40;
+}
+
+.cta:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.ghost {
+  margin-top: 16px;
+  font-size: 13px;
+  color: #64748b;
+  text-decoration: none;
+  border-bottom: 1px dotted #475569;
+}
+
+.ghost:hover {
+  color: #94a3b8;
+}
+
+.chooser {
+  margin-top: 18px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.chooserBtn {
+  cursor: pointer;
+  font-size: 14px;
+  color: #e2e8f0;
+  padding: 10px 18px;
+  border-radius: 10px;
+  border: 1px solid #33415588;
+  background: #0f172acc;
+}
+
+.chooserBtn:hover {
+  border-color: #ff7a4f;
+}
+
+.err {
+  margin-top: 14px;
+  font-size: 13px;
+  color: #fda4af;
+}
+
+.chips {
+  margin-top: 30px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.chip {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8fa3c0;
+  border: 1px solid #1e293b;
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: #0b122599;
+}
+
+.chip b {
+  color: #34d399;
+  font-weight: 700;
+}
+
+/* floating crewmates */
+.floater {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  animation: bob 7s ease-in-out infinite;
+}
+
+@keyframes bob {
+  0%, 100% { transform: translateY(0) rotate(var(--tilt, 0deg)); }
+  50% { transform: translateY(-16px) rotate(var(--tilt, 0deg)); }
+}
+
+/* pool console, folded away — the game is the headline, the plumbing is not */
+.console {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 1080px;
+  padding: 0 20px 28px;
+}
+
+.console summary {
+  cursor: pointer;
+  list-style: none;
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #64748b;
+  padding: 10px;
+}
+
+.console summary:hover {
+  color: #94a3b8;
+}
+
+.console summary::-webkit-details-marker {
+  display: none;
+}
+
+.consoleInner {
+  margin-top: 10px;
+  border-radius: 18px;
+  border: 1px solid #1e293b;
+  background: #f7f7f8;
+  padding: 8px 0 20px;
+}
+
+.footer {
+  position: relative;
+  z-index: 2;
+  padding: 0 0 22px;
+  font-size: 12px;
+  color: #475569;
+  display: flex;
+  gap: 8px;
+}
+
+.footer a {
+  color: #64748b;
+  text-decoration: none;
+  border-bottom: 1px dotted #475569;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page::before,
+  .page::after,
+  .floater {
+    animation: none;
+  }
+}
