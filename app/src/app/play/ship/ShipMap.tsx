@@ -22,6 +22,8 @@ import {
   ROOM_BY_ID,
   killCooldownLeft,
   killReady,
+  sabotageCooldownLeft,
+  sabotageReady,
   lightsOut,
   lightsOutLeft,
   reactorGoing,
@@ -76,6 +78,9 @@ export function ShipMap({
   canKill,
   onInvestigate,
   canCheck,
+  partners,
+  bodies,
+  onReportBody,
   onVent,
   onSabotage,
   onFixLights,
@@ -96,6 +101,11 @@ export function ShipMap({
   onInvestigate: (target: number) => void;
   /** Seer, alive, and has not spent tonight's check. */
   canCheck: boolean;
+  /** Fellow impostors, so you can tell them apart in a crowded room. */
+  partners: number[];
+  /** seat -> room, already fogged to what you can actually see. */
+  bodies: Record<number, RoomId>;
+  onReportBody: (victim: number) => void;
   onVent: () => void;
   onSabotage: () => void;
   onFixLights: () => void;
@@ -118,6 +128,8 @@ export function ShipMap({
   const canKillNow = canKill && killReady(ship);
   const cooldown = killCooldownLeft(ship);
   const ventTo = canKill ? ventFrom(ship.positions[me.seat]) : null;
+  const canSabotage = sabotageReady(ship);
+  const sabotageLeft = sabotageCooldownLeft(ship);
   const meltdown = reactorGoing(ship);
   const meltdownLeft = reactorSecsLeft(ship);
   const inReactor = ship.positions[me.seat] === "reactor";
@@ -129,6 +141,11 @@ export function ShipMap({
   // What this seat already knows. Empty for everyone but the seer — the relay
   // redacts it, so a crewmate's copy is always `{}`.
   const known = me.checks ?? {};
+  // Corpses in your room. The relay fogs these the same way it fogs crewmates,
+  // so this is only ever what you could actually walk in on.
+  const corpsesHere = Object.entries(bodies)
+    .filter(([, room]) => room === here)
+    .map(([seat]) => Number(seat));
   const task = taskHere(ship, me.seat);
   const myTasks = ship.tasks[me.seat] ?? [];
   // One shared number, computed where every role is known. Working it out
@@ -179,11 +196,19 @@ export function ShipMap({
 
               {mine && <span className={s.taskPip} title="You have a task here" />}
 
+              {/* A body in a room you can see. In the dark you find nothing —
+                  which is exactly what the lights sabotage is for. */}
+              {isHere && !dark && corpsesHere.length > 0 && (
+                <span className={s.bodyPip} title="A body is here" />
+              )}
+
               <span className={s.dots}>
                 {dots.map((seat) => (
                   <span
                     key={seat}
-                    className={`${s.dot} ${seat === me.seat ? s.dotMe : ""}`}
+                    className={`${s.dot} ${seat === me.seat ? s.dotMe : ""} ${
+                      partners.includes(seat) ? s.dotPartner : ""
+                    }`}
                     // Staggered so the room does not bob in lockstep, which
                     // reads as a broken loop rather than as people standing.
                     style={{ animationDelay: `${(seat % 5) * 0.24}s` }}
@@ -257,7 +282,11 @@ export function ShipMap({
         )}
 
         {canKill &&
-          roomMates.map((victim) => (
+          // A partner cannot be killed, so do not offer it — the engine would
+          // reject it as "impostor cannot kill self", which reads as a bug.
+          roomMates
+            .filter((victim) => !partners.includes(victim))
+            .map((victim) => (
             <button
               key={victim}
               type="button"
@@ -268,6 +297,19 @@ export function ShipMap({
               {canKillNow
                 ? `Kill ${living.find((x) => x.seat === victim)?.name}`
                 : `Kill in ${cooldown}s`}
+            </button>
+          ))}
+
+        {!me.dead &&
+          !dark &&
+          corpsesHere.map((victim) => (
+            <button
+              key={`body-${victim}`}
+              type="button"
+              className={s.reportBody}
+              onClick={() => onReportBody(victim)}
+            >
+              Report {living.find((x) => x.seat === victim)?.name ?? `seat ${victim}`}&apos;s body
             </button>
           ))}
 
@@ -292,14 +334,24 @@ export function ShipMap({
         )}
 
         {canKill && !dark && (
-          <button type="button" className={s.sabotage} onClick={onSabotage}>
-            Sabotage lights
+          <button
+            type="button"
+            className={s.sabotage}
+            onClick={onSabotage}
+            disabled={!canSabotage}
+          >
+            {canSabotage ? "Sabotage lights" : `Sabotage in ${sabotageLeft}s`}
           </button>
         )}
 
         {canKill && !meltdown && (
-          <button type="button" className={s.sabotage} onClick={onSabotageReactor}>
-            Sabotage reactor
+          <button
+            type="button"
+            className={s.sabotage}
+            onClick={onSabotageReactor}
+            disabled={!canSabotage}
+          >
+            {canSabotage ? "Sabotage reactor" : `Sabotage in ${sabotageLeft}s`}
           </button>
         )}
 

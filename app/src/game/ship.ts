@@ -237,6 +237,19 @@ export type ShipState = {
   positions: Record<number, RoomId>;
   /** seat -> that player's task list. */
   tasks: Record<number, TaskInstance[]>;
+  /**
+   * seat -> the room that seat's body is lying in.
+   *
+   * Separate from `positions` on purpose: a ghost goes on walking the deck, but
+   * the corpse stays where it fell. That is the whole point — "I found them in
+   * Reactor" is evidence, and it only means something if the body does not
+   * follow its owner around.
+   *
+   * Off-chain, like the rest of the deck. The contract records *that* somebody
+   * died and that a body was called in; where it lay is for the players to
+   * argue about, and keeping it out of public storage costs the round nothing.
+   */
+  bodies: Record<number, RoomId>;
   sightings: Sighting[];
   /**
    * Unix ms before which no kill is allowed. Set when the night opens and
@@ -244,6 +257,8 @@ export type ShipState = {
    * share a room, and the night is over before anyone has walked anywhere.
    */
   killReadyAt: number;
+  /** Unix ms before which no sabotage is allowed. */
+  sabotageReadyAt: number;
   /** Unix ms the lights come back on. 0 = lights are up. */
   lightsOutUntil: number;
   /**
@@ -290,6 +305,17 @@ const SECURITY_LOG_ENTRIES = 2;
 
 /** Seconds an impostor must wait before the first (and each next) kill. */
 export const KILL_COOLDOWN_SECS = 20;
+
+/**
+ * Seconds between sabotages.
+ *
+ * There was no limit at all, so an impostor could re-cut the lights the instant
+ * they were fixed and hold the deck dark for the whole night — the crew never
+ * got a window to accrue sightings, which is the evidence the meeting runs on.
+ * Longer than the kill cooldown because a sabotage costs nothing and hits
+ * everybody at once.
+ */
+export const SABOTAGE_COOLDOWN_SECS = 30;
 
 /** Seconds the lights stay out once sabotaged. */
 export const LIGHTS_OUT_SECS = 25;
@@ -365,7 +391,10 @@ export function initShip(
     positions,
     tasks,
     sightings,
+    bodies: {},
     killReadyAt: now + KILL_COOLDOWN_SECS * 1000,
+    // Opens on cooldown too, so the night cannot begin in darkness.
+    sabotageReadyAt: now + SABOTAGE_COOLDOWN_SECS * 1000,
     lightsOutUntil: 0,
     reactorDeadline: 0,
     crewProgress: { done: 0, total: 0 },
@@ -387,7 +416,20 @@ export function reactorBlown(ship: ShipState, now = Date.now()): boolean {
 }
 
 export function sabotageReactor(ship: ShipState, now = Date.now()): ShipState {
-  return { ...ship, reactorDeadline: now + REACTOR_SECS * 1000 };
+  return {
+    ...ship,
+    reactorDeadline: now + REACTOR_SECS * 1000,
+    sabotageReadyAt: now + SABOTAGE_COOLDOWN_SECS * 1000,
+  };
+}
+
+/** Whether the impostor may sabotage right now. */
+export function sabotageReady(ship: ShipState, now = Date.now()): boolean {
+  return now >= ship.sabotageReadyAt;
+}
+
+export function sabotageCooldownLeft(ship: ShipState, now = Date.now()): number {
+  return Math.max(0, Math.ceil((ship.sabotageReadyAt - now) / 1000));
 }
 
 export function fixReactor(ship: ShipState): ShipState {
@@ -424,11 +466,27 @@ export function lightsOutLeft(ship: ShipState, now = Date.now()): number {
  * Electrical can restore them.
  */
 export function sabotageLights(ship: ShipState, now = Date.now()): ShipState {
-  return { ...ship, lightsOutUntil: now + LIGHTS_OUT_SECS * 1000 };
+  return {
+    ...ship,
+    lightsOutUntil: now + LIGHTS_OUT_SECS * 1000,
+    sabotageReadyAt: now + SABOTAGE_COOLDOWN_SECS * 1000,
+  };
 }
 
 export function fixLights(ship: ShipState): ShipState {
   return { ...ship, lightsOutUntil: 0 };
+}
+
+/** Lay a body where its owner is standing. Called when the victim confirms. */
+export function dropBody(ship: ShipState, seat: number): ShipState {
+  return { ...ship, bodies: { ...ship.bodies, [seat]: ship.positions[seat] } };
+}
+
+/** Bodies lying in `room` — what a player standing there can see. */
+export function bodiesIn(ship: ShipState, room: RoomId): number[] {
+  return Object.entries(ship.bodies)
+    .filter(([, r]) => r === room)
+    .map(([seat]) => Number(seat));
 }
 
 /** Travel through a vent. Impostor-only; enforced by the caller. */
@@ -457,7 +515,10 @@ export function resetForRound(
     ...ship,
     positions: spawnRooms(seats),
     sightings: [],
+    // A meeting clears the deck, exactly as `endVote` clears the on-chain flags.
+    bodies: {},
     killReadyAt: now + KILL_COOLDOWN_SECS * 1000,
+    sabotageReadyAt: now + SABOTAGE_COOLDOWN_SECS * 1000,
     lightsOutUntil: 0,
     // A new night starts with a stable reactor, matching `end_vote`.
     reactorDeadline: 0,

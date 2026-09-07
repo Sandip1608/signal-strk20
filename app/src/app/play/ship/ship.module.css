@@ -600,3 +600,51 @@
 .checkGuilty .taskTick { color: #ff4d5e; }
 .checkClear { color: #9fb2e8; }
 .checkClear .taskTick { color: #35d9c4; }
+
+/* A fellow impostor. Red ring, the way Among Us colours a partner's name —
+   without it you cannot tell which of the crewmates beside you is on your
+   side, and the kill you try on them is simply rejected. */
+.dotPartner {
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px #ff4d5e, 0 0 10px #ff4d5e66;
+}
+
+.sabotage:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.4); }
+
+/* A body waiting to be found. Red where the task pip is amber, so the two
+   never read as the same errand. */
+.bodyPip {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ff4d5e;
+  box-shadow: 0 0 0 3px #ff4d5e33;
+  animation: bodyPulse 1.4s ease-in-out infinite;
+}
+@keyframes bodyPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.reportBody {
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 10px;
+  border: none;
+  background: #ff4d5e;
+  color: #2a0009;
+  font: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: filter 0.15s, transform 0.08s;
+}
+.reportBody:hover { filter: brightness(1.08); }
+.reportBody:active { transform: scale(0.985); }
+
+@media (prefers-reduced-motion: reduce) {
+  .bodyPip { animation: none; }
+}

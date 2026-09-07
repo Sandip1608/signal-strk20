@@ -19,9 +19,11 @@ prove.
 
 | | Status |
 |---|---|
-| Cairo contracts (`SignalRound`, `SignalEscrow`) | compile; 46 unit tests pass |
+| Cairo contracts (`SignalRound`, `SignalEscrow`) | compile; 58 unit tests pass |
 | Provably-fair role assignment from a multi-party seed | **done, on-chain** |
 | Night actions — impostor kills **and seer checks** | **done** (simulated, see below) |
+| Crew win by tasks, counted on-chain | **done** |
+| Bodies on the deck — find one to call the meeting | **done** |
 | Turn progression + resolution | **done, on-chain** |
 | Host-tweakable settings as contract configuration | **done** |
 | Playable game (2D deck, tasks, voting, ejection) | **done** |
@@ -147,9 +149,18 @@ Three task minigames (wire matching, keypad, timing gauge). Walking around to
 do tasks is what produces **sightings**, and your vote screen shows what you
 personally witnessed. That is the evidence the crew argue from.
 
-Tasks deliberately **do not** decide the round. The winner is whatever
-`resolve_round` computes from the vote; a second win condition would put the UI
-and the contract into disagreement.
+Tasks are the crew's **second win condition**, and the contract counts them
+itself — which is what stops the UI and the chain disagreeing.
+
+Each completion is a `submit_task()` signed by that seat's burner. The contract
+cannot verify a minigame, and does not pretend to; what it enforces is the part
+that makes the tally honest. No seat may claim more than its own allotment, and
+at `resolve_round` — the first moment roles exist — only seats the derived roles
+say are crew are counted. So an impostor calling `submit_task` achieves nothing,
+which is precisely why the entrypoint does not need to know who is who.
+
+Finishing the list outranks impostor parity: the crew completed the objective
+the game sets them, and an impostor who allowed that has lost on the count.
 
 ## Build and test
 
@@ -197,7 +208,7 @@ include `SignalEscrow`.
 contracts/src/
   round.cairo          state machine + derive_hidden; zero pool coupling
   signal_escrow.cairo  the only pool-facing surface; stateless between calls
-  tests.cairo          46 unit tests
+  tests.cairo          58 unit tests
 app/src/
   game/                engine (mirrors the contract), ship, bots, crypto
   server/rooms.ts      cross-device relay, redacted per viewer

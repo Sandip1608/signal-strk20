@@ -70,9 +70,17 @@ type Store = { rooms: Map<string, Room> };
 const g = globalThis as unknown as { __signalRooms?: Store };
 const store: Store = (g.__signalRooms ??= { rooms: new Map() });
 
-/** Living non-impostors — the seats the shared crew bar counts. */
+/**
+ * Every non-impostor seat — the seats the shared crew bar counts.
+ *
+ * Ghosts included, deliberately. A dead crewmate's finished tasks still filled
+ * the bar, and they can go on filling it, which is the whole reason ghosts keep
+ * a task list. Dropping them would also put the bar out of step with the
+ * contract, whose task-win target is computed over every crew seat: the bar
+ * could read full while `resolve_round` still answered "game not over".
+ */
 function crewSeatsOf(game: GameState): number[] {
-  return game.seats.filter((x) => !x.dead && x.role !== "IMPOSTOR").map((x) => x.seat);
+  return game.seats.filter((x) => x.role !== "IMPOSTOR").map((x) => x.seat);
 }
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no I/O/0/1
@@ -182,7 +190,8 @@ export type Action =
   | { type: "move"; seat: number; to: RoomId }
   | { type: "task"; seat: number; taskId: string }
   | { type: "kill"; seat: number; victim: number }
-  | { type: "report"; seat: number }
+  | { type: "confirmDeath"; seat: number }
+  | { type: "reportBody"; seat: number; victim: number }
   | { type: "skipNight" }
   | { type: "endVote" }
   | { type: "callMeeting"; seat: number }
@@ -194,6 +203,7 @@ export type Action =
   | { type: "fixLights"; seat: number }
   | { type: "vote"; seat: number; candidate: number }
   | { type: "resolve" }
+  | { type: "continue" }
   | { type: "payout" };
 
 /**
@@ -341,9 +351,14 @@ export function applyAction(room: Room, action: Action): void {
       }
       break;
 
-    case "task":
+    case "task": {
+      const me = g0.seats.find((x) => x.seat === action.seat);
+      // The on-chain half. Submitted by everyone, impostors included — the
+      // contract cannot tell them apart until the roles open, and discards
+      // theirs then. Its own per-seat cap is what stops anyone inflating the
+      // bar, so a rejection here is a real rule, not bookkeeping.
+      room.game = engine.submitTask(g0, engine.seatOf(g0, action.seat).sessionKey);
       if (room.ship) {
-        const me = g0.seats.find((x) => x.seat === action.seat);
         room.ship = ship.withCrewProgress(
           ship.completeTask(room.ship, action.seat, action.taskId, {
             isImpostor: me?.role === "IMPOSTOR",
@@ -353,6 +368,7 @@ export function applyAction(room: Room, action: Action): void {
         );
       }
       break;
+    }
 
     case "kill": {
       // Every one of these was enforced only by hiding the button. Over the
@@ -428,11 +444,32 @@ export function applyAction(room: Room, action: Action): void {
       if (room.ship) room.ship = ship.fixLights(room.ship);
       break;
 
-    case "report":
-      room.game = engine.reportNightKill(g0, engine.seatOf(g0, action.seat).sessionKey);
-      // A death changes who the crew are, so the shared total moves with it.
-      if (room.ship) room.ship = ship.withCrewProgress(room.ship, crewSeatsOf(room.game));
+    case "confirmDeath":
+      room.game = engine.confirmDeath(g0, engine.seatOf(g0, action.seat).sessionKey);
+      if (room.ship) {
+        // The corpse stays where they fell; the ghost walks on from here.
+        room.ship = ship.withCrewProgress(
+          ship.dropBody(room.ship, action.seat),
+          crewSeatsOf(room.game),
+        );
+      }
       break;
+
+    case "reportBody": {
+      // You have to be standing over it. The engine cannot check this —
+      // positions are deck state, not `GameState` — so the guard lives here,
+      // the same as the kill and the seer's check.
+      if (!room.ship) throw new engine.ContractError("no deck");
+      if (room.ship.bodies[action.victim] !== room.ship.positions[action.seat]) {
+        throw new engine.ContractError("no body here");
+      }
+      room.game = engine.reportBody(
+        g0,
+        engine.seatOf(g0, action.seat).sessionKey,
+        action.victim,
+      );
+      break;
+    }
 
     case "skipNight":
       room.game = engine.skipNight(g0);
@@ -468,6 +505,50 @@ export function applyAction(room: Room, action: Action): void {
       break;
     }
 
+    /**
+     * One button for the host: finish if the game is over, otherwise play on.
+     *
+     * The client cannot make this call itself. Mid-game the roles are sealed —
+     * that is the entire premise — so nothing outside the contract knows
+     * whether the round is decided. And the contract cannot be asked without
+     * being told: checking the win condition means opening the roles, which is
+     * exactly what `resolve_round` does and what must not happen early.
+     *
+     * So we try to finish and let the contract's own guard answer. "game not
+     * over" is not an error here, it is the answer, and the round plays on. On
+     * chain that costs a reverted call before the real one; off chain it is
+     * free. What it buys is that the host can no longer round *past* a win they
+     * could not see — which is precisely what happened: a table voted out the
+     * last impostor and the game cheerfully started another night.
+     */
+    case "continue": {
+      if (room.hiddenSeats.length === 0) throw new engine.ContractError("roles not assigned");
+      try {
+        room.game = engine.resolveRound(g0, {
+          hiddenSeats: room.hiddenSeats,
+          salt: room.salt,
+          hostSeed: room.hostSeed,
+          recomputedCommitment: poseidonCommitment(room.hiddenSeats, room.salt),
+          recomputedSeedCommitment: seedCommitment(room.hostSeed),
+        });
+        break;
+      } catch (e) {
+        if (!(e instanceof engine.ContractError) || e.message !== "game not over") throw e;
+      }
+      // Not decided: play the next round instead.
+      if (room.ship && ship.reactorBlown(room.ship)) {
+        throw new engine.ContractError("resolve the reactor");
+      }
+      room.game = engine.endVote(g0);
+      if (room.ship) {
+        room.ship = ship.withCrewProgress(
+          ship.resetForRound(room.ship, room.game.seats.map((x) => x.seat)),
+          crewSeatsOf(room.game),
+        );
+      }
+      break;
+    }
+
     case "payout":
       room.game = engine.payout(g0);
       break;
@@ -477,11 +558,17 @@ export function applyAction(room: Room, action: Action): void {
   room.lastTouchedAt = Date.now();
 }
 
-/** Only an impostor may sabotage. */
+/** Only an impostor may sabotage, and not on cooldown. */
 function requireImpostor(room: Room, seat: number): void {
   const who = room.game.seats.find((x) => x.seat === seat);
   if (who?.role !== "IMPOSTOR") throw new engine.ContractError("only an impostor sabotages");
   if (who.dead) throw new engine.ContractError("dead cannot sabotage");
+  // Enforced here, not only by greying the button out: over the relay a second
+  // client can post directly, and holding the deck dark all night is the most
+  // effective thing an unlimited sabotage could do.
+  if (room.ship && !ship.sabotageReady(room.ship)) {
+    throw new engine.ContractError("sabotage on cooldown");
+  }
 }
 
 /** You must actually be standing there to fix it. */
@@ -503,6 +590,9 @@ export const HOST_ONLY = [
   "endVote",
   "skipNight",
   "resolve",
+  // Continue is resolve-or-end-vote, and both of those are host-only. Missing
+  // it here let any joined player drive the round to its finish.
+  "continue",
   "payout",
 ];
 
@@ -547,7 +637,14 @@ export function tickBots(room: Room): void {
         applyAction(room, { type: "kill", seat: action.impostor, victim: action.victim });
         break;
       case "report":
-        applyAction(room, { type: "report", seat: action.seat });
+        applyAction(room, { type: "confirmDeath", seat: action.seat });
+        break;
+      case "reportBody":
+        applyAction(room, {
+          type: "reportBody",
+          seat: action.finder,
+          victim: action.victim,
+        });
         break;
       case "vote":
         applyAction(room, { type: "vote", seat: action.voter, candidate: action.candidate });
@@ -588,11 +685,22 @@ export type ViewerState = {
 export function viewFor(room: Room, seat: number | null, playerId: string | null = null): ViewerState {
   const revealed = room.game.phase === Phase.RESOLVED;
 
+  // Among Us tells the impostors who their partners are. Without it a
+  // multi-impostor game is broken rather than merely harder: they cannot
+  // coordinate, and `privateKill` rejects a partner as "impostor cannot kill
+  // self", which reads as a bug to someone who was never told.
+  //
+  // Only the IMPOSTOR label crosses, and only to an impostor — a seer is not
+  // exposed to them, and crew learn nothing.
+  const viewerRole = seat === null ? undefined : room.game.seats[seat]?.role;
+  const viewerIsImpostor = viewerRole === "IMPOSTOR";
+
   const seats = room.game.seats.map((s) => {
     const mine = s.seat === seat;
+    const partner = viewerIsImpostor && s.role === "IMPOSTOR";
     return {
       ...s,
-      role: mine || revealed ? s.role : undefined,
+      role: mine || revealed || partner ? s.role : undefined,
       sessionPrivateKey: mine ? s.sessionPrivateKey : "",
       // A check result is knowledge one player had to spend their night
       // earning. Shipping it to the table would hand everyone the answer.
@@ -620,6 +728,9 @@ export function viewFor(room: Room, seat: number | null, playerId: string | null
       // Everyone must see the meltdown - it is the one thing the whole crew
       // has to react to at once.
       reactorDeadline: room.ship.reactorDeadline,
+      // Without this the client cannot tell the cooldown is running and the
+      // button looks broken rather than disabled.
+      sabotageReadyAt: room.ship.sabotageReadyAt,
       crewProgress: room.ship.crewProgress,
       positions,
       // Task lists are sent in full, deliberately. They carry no role
@@ -627,6 +738,12 @@ export function viewFor(room: Room, seat: number | null, playerId: string | null
       // progress bar is computed from all of them, so redacting them would
       // show every player only their own three tasks as "the crew total".
       tasks: room.ship.tasks,
+      // Bodies obey the same fog as crewmates: you see the one you are standing
+      // over, nothing else. Broadcasting the map of corpses would hand everyone
+      // the murder scene without anyone having to walk there.
+      bodies: Object.fromEntries(
+        Object.entries(room.ship.bodies).filter(([, r]) => myRoom !== null && r === myRoom),
+      ) as Record<number, RoomId>,
       sightings: room.ship.sightings.filter((s) => s.observer === seat),
     };
   }

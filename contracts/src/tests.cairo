@@ -277,16 +277,47 @@ mod tests {
     /// this is the check that makes that choice honest rather than trusted -
     /// getting it wrong would let a host end on whichever round suited them.
     fn game_over(impostors_alive: u32, crew_alive: u32) -> bool {
-        impostors_alive == 0 || impostors_alive >= crew_alive
+        // Round 0: the cap is nowhere near, so this is the mid-game rule.
+        game_over_at(impostors_alive, crew_alive, 0)
     }
-    fn crew_won(impostors_alive: u32) -> bool {
+
+    /// The full rule, including the round cap. `end_vote` refuses to start a
+    /// round once `round + 1 == MAX_ROUNDS`, so if this did not also accept
+    /// that point as terminal there would be no legal move left at all.
+    fn game_over_at(impostors_alive: u32, crew_alive: u32, round: u32) -> bool {
+        over(impostors_alive, crew_alive, round, 0, 0)
+    }
+
+    /// The whole rule, including the crew's task win.
+    fn over(
+        impostors_alive: u32, crew_alive: u32, round: u32, crew_tasks: u32, target: u32,
+    ) -> bool {
         impostors_alive == 0
+            || impostors_alive >= crew_alive
+            || tasks_won(crew_tasks, target)
+            || round + 1 >= signal::round::MAX_ROUNDS
+    }
+
+    /// `target == 0` means tasks are switched off. Without that guard a zero
+    /// target is trivially met and the crew win on round 0 for doing nothing.
+    fn tasks_won(crew_tasks: u32, target: u32) -> bool {
+        target != 0 && crew_tasks >= target
+    }
+
+    fn crew_won(impostors_alive: u32, crew_alive: u32) -> bool {
+        crew_won_with(impostors_alive, crew_alive, 0, 0)
+    }
+
+    fn crew_won_with(
+        impostors_alive: u32, crew_alive: u32, crew_tasks: u32, target: u32,
+    ) -> bool {
+        tasks_won(crew_tasks, target) || !(impostors_alive >= crew_alive)
     }
 
     #[test]
     fn all_impostors_gone_is_a_crew_win() {
         assert(game_over(0, 3), 'should be over');
-        assert(crew_won(0), 'crew should win');
+        assert(crew_won(0, 3), 'crew should win');
     }
 
     #[test]
@@ -294,13 +325,13 @@ mod tests {
         // 1 impostor vs 1 crew: the impostor cannot be out-voted, so Among Us
         // stops here rather than playing a decided round.
         assert(game_over(1, 1), 'should be over');
-        assert(!crew_won(1), 'impostor should win');
+        assert(!crew_won(1, 1), 'impostor should win');
     }
 
     #[test]
     fn impostors_outnumbering_crew_ends_it() {
         assert(game_over(2, 1), 'should be over');
-        assert(!crew_won(2), 'impostor should win');
+        assert(!crew_won(2, 1), 'impostor should win');
     }
 
     #[test]
@@ -324,6 +355,122 @@ mod tests {
         assert(!game_over(2, 3), 'k=2 n=5 already over');
         // 3 impostors, 7 players
         assert(!game_over(3, 4), 'k=3 n=7 already over');
+    }
+
+    /// The bug this closes: a table that reached the cap with the impostors
+    /// alive but not yet a majority satisfied neither guard. `end_vote` refused
+    /// ('too many rounds') and `resolve_round` refused ('game not over'), so the
+    /// round was stuck for good and the escrowed buy-ins with it.
+    #[test]
+    fn reaching_the_round_cap_ends_the_game() {
+        let last = signal::round::MAX_ROUNDS - 1;
+        // 1 impostor still alive among 4 crew - not a win by either rule.
+        assert(!game_over_at(1, 4, last - 1), 'not over one round earlier');
+        assert(game_over_at(1, 4, last), 'cap must end it');
+    }
+
+    /// Surviving every round the game allows is a crew win: the impostors had
+    /// their chances and did not take the ship.
+    #[test]
+    fn surviving_to_the_cap_is_a_crew_win() {
+        assert(crew_won(1, 4), 'crew survived the cap');
+    }
+
+    /// The cap must not hand the round to the crew when the impostors have
+    /// actually won on it - a majority still decides.
+    #[test]
+    fn the_cap_does_not_rescue_a_lost_crew() {
+        assert(game_over_at(2, 1, signal::round::MAX_ROUNDS - 1), 'should be over');
+        assert(!crew_won(2, 1), 'impostors took the ship');
+    }
+
+    /// And the cap must not become a general escape hatch: before it, an
+    /// undecided game is still refused, which is what stops a host resolving on
+    /// whichever round happens to suit them.
+    #[test]
+    fn the_cap_does_not_let_a_host_finish_early() {
+        let mut r: u32 = 0;
+        while r + 1 < signal::round::MAX_ROUNDS {
+            assert(!game_over_at(1, 4, r), 'early finish allowed');
+            r += 1;
+        }
+    }
+
+    // ── the crew's second win condition ───────────────────────────────────
+
+    /// Among Us gives the crew a way to win by playing rather than arguing.
+    /// Before this the only crew win was voting out every impostor.
+    #[test]
+    fn finishing_every_task_wins_it_for_the_crew() {
+        // 4 crew x 3 tasks, one impostor still alive and hidden among them.
+        assert(!over(1, 4, 0, 11, 12), 'not over at 11 of 12');
+        assert(over(1, 4, 0, 12, 12), 'the last task ends it');
+        assert(crew_won_with(1, 4, 12, 12), 'crew should win');
+    }
+
+    /// Finishing the list beats parity. The crew completed the objective the
+    /// game sets them; an impostor who allowed that has lost on the count.
+    #[test]
+    fn the_task_win_beats_impostor_parity() {
+        assert(over(1, 1, 0, 3, 3), 'should be over');
+        assert(crew_won_with(1, 1, 3, 3), 'tasks should outrank parity');
+        // ...and without the tasks, parity still wins it for them.
+        assert(!crew_won_with(1, 1, 0, 3), 'parity wins with no tasks');
+    }
+
+    /// Tasks off must not hand the crew an instant win.
+    #[test]
+    fn a_zero_task_target_never_wins() {
+        assert(!tasks_won(0, 0), 'zero target must not win');
+        assert(!over(1, 4, 0, 0, 0), 'tasks off must keep playing');
+    }
+
+    /// Only crew submissions are counted, which is what makes an impostor
+    /// calling `submit_task` pointless. Modelled here as the target being the
+    /// crew's allotment: their own tasks alone must be able to reach it.
+    #[test]
+    fn impostor_submissions_cannot_fill_the_bar() {
+        // 4 crew x 3 = 12 is the target; the crew have managed 9.
+        // An impostor adding three of their own must not tip it over.
+        assert(!over(1, 4, 0, 9, 12), 'impostor tasks must not count');
+    }
+
+    // ── finding a body ────────────────────────────────────────────────────
+
+    /// Mirrors the guard in `report_body`. A body is reportable only if the
+    /// seat attested its own death this round and nobody has called it in yet.
+    fn can_report(unreported: bool, finder_dead: bool) -> bool {
+        unreported && !finder_dead
+    }
+
+    #[test]
+    fn a_fresh_body_can_be_called_in() {
+        assert(can_report(true, false), 'should be reportable');
+    }
+
+    /// The hole this closes. Death is self-attested, so `report_body` cannot
+    /// verify a corpse — it can only check the flag. Without clearing that flag
+    /// at the meeting, any player could re-report an old body, or an ejected
+    /// one, and open a vote whenever they liked. That is precisely the stall
+    /// `call_meeting`'s once-per-seat limit exists to prevent.
+    #[test]
+    fn a_stale_body_is_not_a_free_meeting() {
+        assert(!can_report(false, false), 'stale body must not report');
+    }
+
+    #[test]
+    fn a_ghost_cannot_call_in_a_body() {
+        assert(!can_report(true, true), 'dead cannot report');
+    }
+
+    /// Reporting is what opens the vote, and it can only happen once, so the
+    /// same corpse cannot re-open a ballot that is already running.
+    #[test]
+    fn reporting_clears_the_body() {
+        let mut unreported = true;
+        assert(can_report(unreported, false), 'first report ok');
+        unreported = false; // `report_body` writes this
+        assert(!can_report(unreported, false), 'second report refused');
     }
 
     #[test]

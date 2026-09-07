@@ -71,7 +71,10 @@ type Store = {
   assignRoles: () => void;
   startNight: () => void;
   kill: (victimSeat: number) => void;
-  report: (seat: number) => void;
+  /** The victim opens their note: they die and leave a body. */
+  confirmDeath: (seat: number) => void;
+  /** A living player calls in a body they are standing over. */
+  reportBody: (seat: number, victim: number) => void;
   skipNight: () => void;
   endVote: () => void;
   callMeeting: (seat: number) => void;
@@ -87,6 +90,8 @@ type Store = {
   moveTo: (seat: number, to: RoomId) => void;
   completeTask: (seat: number, taskId: string) => void;
   resolve: () => void;
+  /** Finish if the game is over, otherwise play on — the contract decides. */
+  continueRound: () => void;
   payout: () => void;
 
   setViewer: (seat: number | null) => void;
@@ -120,9 +125,17 @@ export type RoundOpts = {
   confirmEjects?: boolean;
 };
 
-/** Living non-impostors — the seats the shared crew bar counts. */
+/**
+ * Every non-impostor seat — the seats the shared crew bar counts.
+ *
+ * Ghosts included, deliberately. A dead crewmate's finished tasks still filled
+ * the bar, and they can go on filling it, which is the whole reason ghosts keep
+ * a task list. Dropping them would also put the bar out of step with the
+ * contract, whose task-win target is computed over every crew seat: the bar
+ * could read full while `resolve_round` still answered "game not over".
+ */
 function crewSeatsOf(game: GameState): number[] {
-  return game.seats.filter((x) => !x.dead && x.role !== "IMPOSTOR").map((x) => x.seat);
+  return game.seats.filter((x) => x.role !== "IMPOSTOR").map((x) => x.seat);
 }
 
 const HOST = "0xhost";
@@ -322,6 +335,9 @@ export const useGame = create<Store>((set, get) => ({
       void get().send({ type: "task", taskId });
       return;
     }
+    // The on-chain half first, so a rejected submission (list already done)
+    // surfaces the same way it would over the relay.
+    apply(set, (g) => engine.submitTask(g, engine.seatOf(g, seat).sessionKey));
     set((st) => {
       if (!st.ship || !st.game) return {};
       const me = st.game.seats.find((x) => x.seat === seat);
@@ -342,17 +358,29 @@ export const useGame = create<Store>((set, get) => ({
     set((st) => (st.ship ? { ship: ship.armKillCooldown(st.ship) } : {}));
   },
 
-  report: (seat) => {
+  confirmDeath: (seat) => {
     if (get().mode === "online") {
-      void get().send({ type: "report" });
+      void get().send({ type: "confirmDeath" });
       return;
     }
-    apply(set, (g) => {
-      const s = engine.seatOf(g, seat);
-      return engine.reportNightKill(g, s.sessionKey);
-    });
+    apply(set, (g) => engine.confirmDeath(g, engine.seatOf(g, seat).sessionKey));
     const g2 = get().game;
-    set((st) => (st.ship && g2 ? { ship: ship.withCrewProgress(st.ship, crewSeatsOf(g2)) } : {}));
+    set((st) =>
+      st.ship && g2
+        ? {
+            // The corpse stays where they fell; the ghost walks on from here.
+            ship: ship.withCrewProgress(ship.dropBody(st.ship, seat), crewSeatsOf(g2)),
+          }
+        : {},
+    );
+  },
+
+  reportBody: (seat, victim) => {
+    if (get().mode === "online") {
+      void get().send({ type: "reportBody", victim });
+      return;
+    }
+    apply(set, (g) => engine.reportBody(g, engine.seatOf(g, seat).sessionKey, victim));
   },
 
   skipNight: () => {
@@ -421,6 +449,13 @@ export const useGame = create<Store>((set, get) => ({
   },
 
   sabotageLights: () => {
+    // Mirrors the relay guard; the local deck is one trusted device but the
+    // two paths drifting is how a rule quietly stops applying in solo play.
+    const st0 = get();
+    if (st0.mode === "local" && st0.ship && !ship.sabotageReady(st0.ship)) {
+      set({ error: "sabotage on cooldown" });
+      return;
+    }
     if (get().mode === "online") {
       void get().send({ type: "sabotageLights" });
       return;
@@ -429,6 +464,11 @@ export const useGame = create<Store>((set, get) => ({
   },
 
   sabotageReactor: () => {
+    const st1 = get();
+    if (st1.mode === "local" && st1.ship && !ship.sabotageReady(st1.ship)) {
+      set({ error: "sabotage on cooldown" });
+      return;
+    }
     if (get().mode === "online") {
       void get().send({ type: "sabotageReactor" });
       return;
@@ -480,6 +520,39 @@ export const useGame = create<Store>((set, get) => ({
     );
   },
 
+  /**
+   * One button for the host. See the long note on the relay's "continue" case:
+   * the client cannot tell whether the game is over, because mid-game the roles
+   * are sealed, so it asks the contract by trying to finish and treats
+   * "game not over" as the answer rather than an error.
+   */
+  continueRound: () => {
+    if (get().mode === "online") {
+      void get().send({ type: "continue" });
+      return;
+    }
+    const g = get().game;
+    if (!g || g.hiddenSeats.length === 0) return;
+    try {
+      const finished = engine.resolveRound(g, {
+        hiddenSeats: g.hiddenSeats,
+        salt: g.salt,
+        hostSeed: hostSeedRef.current,
+        recomputedCommitment: poseidonCommitment(g.hiddenSeats, g.salt),
+        recomputedSeedCommitment: seedCommitment(hostSeedRef.current),
+      });
+      set({ game: finished, error: null });
+      return;
+    } catch (e) {
+      const over = e instanceof engine.ContractError && e.message === "game not over";
+      if (!over) {
+        set({ error: e instanceof Error ? e.message : String(e) });
+        return;
+      }
+    }
+    get().endVote();
+  },
+
   payout: () => {
     if (get().mode === "online") {
       void get().send({ type: "payout" });
@@ -494,12 +567,27 @@ export const useGame = create<Store>((set, get) => ({
    * yank a human out of their own reveal screen mid-turn.
    */
   botAct: (action) => {
+    // A bot must never write to the human's error banner. It races them (both
+    // voting on the same tick, a task submitted twice) and losing that race is
+    // ordinary, not something the player did — the relay's `tickBots` swallows
+    // exactly the same way.
+    const quiet = () => set({ error: null });
     if (action.kind === "move") {
       get().moveTo(action.seat, action.to);
       return;
     }
     if (action.kind === "task") {
       get().completeTask(action.seat, action.taskId);
+      quiet();
+      return;
+    }
+    if (action.kind === "report") {
+      // Routed through the store action rather than applied inline, because a
+      // death has to leave a body on the deck and `apply` only touches `game`.
+      // Applied inline, a bot killed in a solo game died with no corpse and the
+      // round quietly had nothing left to find.
+      get().confirmDeath(action.seat);
+      quiet();
       return;
     }
     apply(set, (g) => {
@@ -510,8 +598,12 @@ export const useGame = create<Store>((set, get) => ({
           return engine.privateKill(g, action.victim);
         case "check":
           return engine.investigate(g, action.seer, action.target);
-        case "report":
-          return engine.reportNightKill(g, engine.seatOf(g, action.seat).sessionKey);
+        case "reportBody":
+          return engine.reportBody(
+            g,
+            engine.seatOf(g, action.finder).sessionKey,
+            action.victim,
+          );
         case "vote":
           return engine.handleVote(g, {
             voterSeat: action.voter,

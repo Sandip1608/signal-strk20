@@ -13,7 +13,7 @@ everything identifying is shielded.
 |---|---|---|
 | Buy-in | **Shield** (deposit → encrypted note) | The pot funds enter the pool; funding wallets are visible at the pool edge but nowhere in the game. |
 | Role assignment | **Encrypted notes** (phase 5 memo, 0-value confidential note per player) | Only the holder's viewing key decrypts their role. On-chain, the host posts `poseidon(impostor_seat, salt)` — a commitment that makes the reveal provably fair. |
-| Night kill | **Private transfer** (a "kill token" note to the victim) | Nobody — not even the round contract — sees who sent it or who received it. The victim decrypts, learns they're dead, and self-reports on-chain with their session key. |
+| Night kill | **Private transfer** (a "kill token" note to the victim) | Nobody — not even the round contract — sees who sent it or who received it. The victim decrypts, learns they're dead, and attests to it on-chain with their session key. The body then waits on the deck until another player finds it and calls it in. |
 | Anonymous vote | **`privacy_invoke` with an open-note leg** | The pool withdraws the voter's vote stake to `SignalEscrow`; the escrow reports `(candidate, amount)` publicly to the tally. Sender: hidden inside the pool. Tally: publicly computable (RFP requirement). |
 | Payout | **Open-note deposit** back into the pool | Winners registered a pre-created open note at join time. The escrow returns `OpenNoteDeposit[]` and the pool credits those notes. Never a public ERC-20 transfer to a wallet. |
 | In-round identity | **Session keys** (burner EOAs, client-side) | `kill`-adjacent and `vote`-adjacent actions are signed by a burner, never by the wallet that shielded the buy-in. Without this the "unlinkable" claim is false. |
@@ -60,8 +60,13 @@ everything identifying is shielded.
    0-value encrypted note whose memo says `CREW` or `IMPOSTOR`.
 3. **Night.** `start_night()`. The impostor privately transfers the kill
    note to a victim inside the pool. The victim decrypts it and calls
-   `report_night_kill()` **with their session key** → vote opens. If
-   nobody reports by the deadline, `skip_night()`.
+   `confirm_death()` **with their session key** — that signature is the only
+   proof of a death the contract can have, since it never learns a kill
+   happened. That does *not* open the vote: it leaves a body where they fell,
+   and any living player standing over it calls `report_body(seat)`, which
+   does. So a night can hold more than one kill, and "where was the body" is
+   evidence a player has to walk to. If nobody finds one by the deadline,
+   `skip_night()`.
 4. **Vote.** Each living player votes by running a `privacy_invoke` (phase
    7) against `SignalEscrow` with `operation = Vote` and the candidate
    seat as the payload. The tally accumulates publicly in `SignalRound`;
@@ -80,8 +85,15 @@ everything identifying is shielded.
   makes the assignment *binding* (host can't re-pick the impostor after
   the vote), not *unbiased*. A commit-reveal from all players or VRF would
   fix bias — Phase 2.
-- **Death is self-reported.** The victim has a grief option (refuse to
-  report); the night deadline + `skip_night` bounds it.
+- **Death is self-attested.** The contract cannot see a kill, so it takes the
+  victim's signature for it — which also means a player can declare themselves
+  dead unprompted. The only seat that ends is their own, at the cost of their
+  round. The victim still has a grief option (refuse to open the note); the
+  night deadline + `skip_night` bounds it.
+- **Where a body lay is off-chain.** The contract records *that* a seat died
+  and that a body was called in; the room is deck state, argued over by players
+  rather than agreed on by the round. Keeping it out of public storage costs
+  the game nothing and the privacy surface stays as small as it was.
 - **Vote privacy = pool anonymity set.** A vote leg is anonymous among
   pool users, not just among the 5–7 players.
 

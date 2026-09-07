@@ -63,7 +63,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
     "move",
     "task",
     "kill",
-    "report",
+    "confirmDeath",
+    "reportBody",
     "vote",
     "callMeeting",
     // A check is signed by the seer's own seat, never a seat they name.

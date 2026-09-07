@@ -112,6 +112,7 @@ export type BotAction =
   | { kind: "seeRole"; seat: number }
   | { kind: "kill"; impostor: number; victim: number }
   | { kind: "report"; seat: number }
+  | { kind: "reportBody"; finder: number; victim: number }
   | { kind: "vote"; voter: number; candidate: number }
   | { kind: "move"; seat: number; to: RoomId }
   | { kind: "task"; seat: number; taskId: string }
@@ -161,7 +162,8 @@ function nightElapsedFraction(state: GameState, now = Date.now()): number {
  * by, so watching who was where stays meaningful evidence.
  */
 export function nextNightAction(state: GameState, ship: ShipState): BotAction | null {
-  // 1. A kill note already delivered to a bot: it reports itself.
+  // 1. A kill note already delivered to a bot: it opens it and dies. This no
+  //    longer calls the meeting — it leaves a body for somebody to find.
   if (state.pendingVictim !== 0) {
     const victim = state.seats[state.pendingVictim - 1];
     return victim?.isBot ? { kind: "report", seat: victim.seat } : null;
@@ -170,7 +172,24 @@ export function nextNightAction(state: GameState, ship: ShipState): BotAction | 
   const living = livingSeats(state);
   const livingSeatNos = living.map((x) => x.seat);
 
-  // 2. A bot impostor alone with someone takes the chance — but only once the
+  // 2. A living bot standing over a body calls it in. Without this a body a
+  //    human never walks past is never found, and in a solo game that is most
+  //    of them — the round would just run out its clock every time.
+  const corpses = Object.keys(state.unreportedBody)
+    .filter((k) => state.unreportedBody[Number(k)])
+    .map(Number);
+  if (corpses.length > 0) {
+    for (const finder of living) {
+      if (!finder.isBot) continue;
+      const here = ship.positions[finder.seat];
+      const found = corpses.find((c) => ship.bodies[c] === here);
+      if (found !== undefined) {
+        return { kind: "reportBody", finder: finder.seat, victim: found };
+      }
+    }
+  }
+
+  // 3. A bot impostor alone with someone takes the chance — but only once the
   //    night is a third gone.
   //
   //    Without this gate the impostor kills on the first beat it shares a room
@@ -190,7 +209,7 @@ export function nextNightAction(state: GameState, ship: ShipState): BotAction | 
     }
   }
 
-  // 3. A bot seer spends its one check on whoever it is standing with.
+  // 4. A bot seer spends its one check on whoever it is standing with.
   const seer = living.find(
     (x) => x.isBot && x.role === "SEER" && x.checkedRound !== state.roundNumber,
   );
@@ -203,14 +222,26 @@ export function nextNightAction(state: GameState, ship: ShipState): BotAction | 
     if (near.length > 0) return { kind: "check", seer: seer.seat, target: pick(near)! };
   }
 
-  // 4. Standing on an unfinished task: do it.
-  const worker = living.find((x) => x.isBot && taskHere(ship, x.seat) !== null);
+  // 5. Standing on an unfinished task: do it — unless this seat has already
+  //    submitted its whole allotment.
+  //
+  //    That second clause matters more than it looks. An impostor's tasks are
+  //    fake and never mark themselves done, so `taskHere` keeps handing back
+  //    the same one forever: the bot re-submitted it every beat, tripped the
+  //    contract's per-seat cap, and the rejection surfaced on the *human's*
+  //    screen as a permanent "reverted: task list already done".
+  const worker = living.find(
+    (x) =>
+      x.isBot &&
+      taskHere(ship, x.seat) !== null &&
+      (state.tasksDone[x.seat] ?? 0) < state.tasksPerPlayer,
+  );
   if (worker) {
     const t = taskHere(ship, worker.seat)!;
     return { kind: "task", seat: worker.seat, taskId: t.id };
   }
 
-  // 5. Otherwise somebody walks.
+  // 6. Otherwise somebody walks.
   const walkers = living.filter((x) => x.isBot);
   const walker = pick(walkers);
   if (!walker) return null;

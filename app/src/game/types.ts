@@ -154,6 +154,31 @@ export type GameState = {
    * `confirmEjects` is on and somebody was actually ejected.
    */
   ejectedWasImpostor: Record<number, boolean>;
+  /**
+   * seat -> tasks that seat has submitted. Mirrors `tasks_done` on-chain.
+   *
+   * Public by design: the contract counts these to decide the crew's own win
+   * condition, and it can only tell crew from impostor once the roles open at
+   * resolve — so it accepts submissions from anyone and discards the
+   * impostors' at the end.
+   *
+   * Worth being clear about the cost. Among Us shows only the aggregate bar;
+   * this is per seat, and on-chain storage is public, so a player who submits
+   * nothing is visible as such. An impostor is dealt a full fake list and can
+   * submit against it at the same rate, so keeping pace is free — the tell only
+   * catches one who does not bother, which is the same read as "he was not
+   * doing tasks" at a real table. Hiding it in the UI would be a lie about what
+   * the chain shows.
+   */
+  tasksDone: Record<number, number>;
+  /**
+   * seat -> killed this round and not yet reported. Mirrors `unreported_body`.
+   *
+   * This is what keeps `reportBody` from becoming an unlimited emergency
+   * meeting: without it anyone could "report" a corpse from three rounds ago,
+   * or an ejected player, and open a vote at will.
+   */
+  unreportedBody: Record<number, boolean>;
   /** `seat + 1`; 0 = nobody died this round. */
   nightVictim: number;
   /**
@@ -162,7 +187,7 @@ export type GameState = {
    *
    * This has no on-chain counterpart *by design* — it mirrors a note sitting
    * undecrypted in the victim's inbox inside the pool. The round contract
-   * genuinely does not know a kill happened until `report_night_kill`.
+   * genuinely does not know a kill happened until `confirm_death`.
    */
   pendingVictim: number;
 
@@ -198,7 +223,14 @@ export type LogEntry = {
  */
 export const SKIP_VOTE = 0xffffffff;
 
-/** `round.cairo::MAX_ROUNDS` - the stall cap on the host-driven loop. */
+/**
+ * `round.cairo::MAX_ROUNDS` - the stall cap on the host-driven loop.
+ *
+ * Permits 9 completed rounds, not 10: `endVote` asserts
+ * `roundNumber + 1 < MAX_ROUNDS` and rounds count from 0. Reaching the cap is
+ * terminal — `resolveRound` accepts it as a crew win — so it ends the game
+ * rather than stranding it.
+ */
 export const MAX_ROUNDS = 10;
 
 /** The buy-in / vote weight unit. One seat, one vote of equal weight in v1. */
