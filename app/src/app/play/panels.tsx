@@ -484,7 +484,7 @@ export function NightPanel({ game }: { game: GameState }) {
 // ── Vote ───────────────────────────────────────────────────────────────────
 
 export function VotePanel({ game }: { game: GameState }) {
-  const { viewerSeat, revealed, setViewer, reveal, cover, vote, resolve, ship, mode, endVote, mySeat } =
+  const { viewerSeat, revealed, setViewer, reveal, cover, vote, ship, mode, continueRound, mySeat } =
     useGame();
   const online = mode === "online";
   const pinned = ownDeviceSeat(game, mode, mySeat) !== null;
@@ -629,24 +629,23 @@ export function VotePanel({ game }: { game: GameState }) {
       </div>
 
       <div className={s.btnRow}>
+        {/* One button, not two.
+
+            Offering "Next round" and "Reveal & resolve" side by side asked the
+            host to answer a question only the contract can: mid-game the roles
+            are sealed, so nobody at the table knows whether the round is
+            decided. Choosing wrong rounded straight past a win — a table voted
+            out the last impostor and the game started another night.
+
+            This asks instead. It tries to finish, and plays on only if the
+            contract's own guard says the game is not over. */}
         <button
           type="button"
-          className={`${s.btn} ${s.btnGhost}`}
-          onClick={endVote}
-          // `end_vote` refuses to open a round past the cap, so offering the
-          // button there could only ever revert.
-          disabled={!voteClosed.passed || atRoundCap}
+          className={s.btn}
+          onClick={continueRound}
+          disabled={!voteClosed.passed}
         >
-          {atRoundCap
-            ? "Last round played"
-            : voteClosed.passed
-              ? "Next round (host)"
-              : `Next round in ${voteClosed.secondsLeft}s`}
-        </button>
-        <button type="button" className={s.btn} onClick={resolve} disabled={!voteClosed.passed}>
-          {voteClosed.passed
-            ? "Reveal & resolve (host)"
-            : `Reveal in ${voteClosed.secondsLeft}s`}
+          {voteClosed.passed ? "Continue (host)" : `Continue in ${voteClosed.secondsLeft}s`}
         </button>
         <span className={s.tagline}>
           {!voteClosed.passed
@@ -657,12 +656,11 @@ export function VotePanel({ game }: { game: GameState }) {
               ? "Every crew task is done — open the commitment and the contract will count them as a crew win."
               : atRoundCap
               ? // Reaching the cap is itself terminal: the impostors had every
-                // round the game allows. Resolve is the only move left, and it
-                // is now a legal one.
-                `Round ${game.roundNumber + 1} was the last. Open the commitment to finish — surviving the cap is a crew win.`
+                // round the game allows.
+                `Round ${game.roundNumber + 1} was the last — continuing will open the commitment and finish. Surviving the cap is a crew win.`
               : everyoneVoted
                 ? "Everyone has voted. No need to wait for the clock."
-                : "Ballot closed. Play on, or open the commitment to finish — resolving before the game is actually over is rejected."}
+                : "Ballot closed. Continue: the contract opens the commitment if the game is decided, and deals another night if it is not."}
         </span>
       </div>
     </div>

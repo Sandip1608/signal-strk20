@@ -168,6 +168,7 @@ export type Action =
   | { type: "fixLights"; seat: number }
   | { type: "vote"; seat: number; candidate: number }
   | { type: "resolve" }
+  | { type: "continue" }
   | { type: "payout" };
 
 /**
@@ -409,6 +410,50 @@ export function applyAction(room: Room, action: Action): void {
       break;
     }
 
+    /**
+     * One button for the host: finish if the game is over, otherwise play on.
+     *
+     * The client cannot make this call itself. Mid-game the roles are sealed —
+     * that is the entire premise — so nothing outside the contract knows
+     * whether the round is decided. And the contract cannot be asked without
+     * being told: checking the win condition means opening the roles, which is
+     * exactly what `resolve_round` does and what must not happen early.
+     *
+     * So we try to finish and let the contract's own guard answer. "game not
+     * over" is not an error here, it is the answer, and the round plays on. On
+     * chain that costs a reverted call before the real one; off chain it is
+     * free. What it buys is that the host can no longer round *past* a win they
+     * could not see — which is precisely what happened: a table voted out the
+     * last impostor and the game cheerfully started another night.
+     */
+    case "continue": {
+      if (room.hiddenSeats.length === 0) throw new engine.ContractError("roles not assigned");
+      try {
+        room.game = engine.resolveRound(g0, {
+          hiddenSeats: room.hiddenSeats,
+          salt: room.salt,
+          hostSeed: room.hostSeed,
+          recomputedCommitment: poseidonCommitment(room.hiddenSeats, room.salt),
+          recomputedSeedCommitment: seedCommitment(room.hostSeed),
+        });
+        break;
+      } catch (e) {
+        if (!(e instanceof engine.ContractError) || e.message !== "game not over") throw e;
+      }
+      // Not decided: play the next round instead.
+      if (room.ship && ship.reactorBlown(room.ship)) {
+        throw new engine.ContractError("resolve the reactor");
+      }
+      room.game = engine.endVote(g0);
+      if (room.ship) {
+        room.ship = ship.withCrewProgress(
+          ship.resetForRound(room.ship, room.game.seats.map((x) => x.seat)),
+          crewSeatsOf(room.game),
+        );
+      }
+      break;
+    }
+
     case "payout":
       room.game = engine.payout(g0);
       break;
@@ -448,6 +493,9 @@ export const HOST_ONLY = [
   "endVote",
   "skipNight",
   "resolve",
+  // Continue is resolve-or-end-vote, and both of those are host-only. Missing
+  // it here let any joined player drive the round to its finish.
+  "continue",
   "payout",
 ];
 

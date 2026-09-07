@@ -84,6 +84,8 @@ type Store = {
   moveTo: (seat: number, to: RoomId) => void;
   completeTask: (seat: number, taskId: string) => void;
   resolve: () => void;
+  /** Finish if the game is over, otherwise play on — the contract decides. */
+  continueRound: () => void;
   payout: () => void;
 
   setViewer: (seat: number | null) => void;
@@ -478,6 +480,39 @@ export const useGame = create<Store>((set, get) => ({
         recomputedSeedCommitment: seedCommitment(hostSeedRef.current),
       }),
     );
+  },
+
+  /**
+   * One button for the host. See the long note on the relay's "continue" case:
+   * the client cannot tell whether the game is over, because mid-game the roles
+   * are sealed, so it asks the contract by trying to finish and treats
+   * "game not over" as the answer rather than an error.
+   */
+  continueRound: () => {
+    if (get().mode === "online") {
+      void get().send({ type: "continue" });
+      return;
+    }
+    const g = get().game;
+    if (!g || g.hiddenSeats.length === 0) return;
+    try {
+      const finished = engine.resolveRound(g, {
+        hiddenSeats: g.hiddenSeats,
+        salt: g.salt,
+        hostSeed: hostSeedRef.current,
+        recomputedCommitment: poseidonCommitment(g.hiddenSeats, g.salt),
+        recomputedSeedCommitment: seedCommitment(hostSeedRef.current),
+      });
+      set({ game: finished, error: null });
+      return;
+    } catch (e) {
+      const over = e instanceof engine.ContractError && e.message === "game not over";
+      if (!over) {
+        set({ error: e instanceof Error ? e.message : String(e) });
+        return;
+      }
+    }
+    get().endVote();
   },
 
   payout: () => {
