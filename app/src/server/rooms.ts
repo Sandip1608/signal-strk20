@@ -155,7 +155,8 @@ export type Action =
   | { type: "move"; seat: number; to: RoomId }
   | { type: "task"; seat: number; taskId: string }
   | { type: "kill"; seat: number; victim: number }
-  | { type: "report"; seat: number }
+  | { type: "confirmDeath"; seat: number }
+  | { type: "reportBody"; seat: number; victim: number }
   | { type: "skipNight" }
   | { type: "endVote" }
   | { type: "callMeeting"; seat: number }
@@ -347,11 +348,32 @@ export function applyAction(room: Room, action: Action): void {
       if (room.ship) room.ship = ship.fixLights(room.ship);
       break;
 
-    case "report":
-      room.game = engine.reportNightKill(g0, engine.seatOf(g0, action.seat).sessionKey);
-      // A death changes who the crew are, so the shared total moves with it.
-      if (room.ship) room.ship = ship.withCrewProgress(room.ship, crewSeatsOf(room.game));
+    case "confirmDeath":
+      room.game = engine.confirmDeath(g0, engine.seatOf(g0, action.seat).sessionKey);
+      if (room.ship) {
+        // The corpse stays where they fell; the ghost walks on from here.
+        room.ship = ship.withCrewProgress(
+          ship.dropBody(room.ship, action.seat),
+          crewSeatsOf(room.game),
+        );
+      }
       break;
+
+    case "reportBody": {
+      // You have to be standing over it. The engine cannot check this —
+      // positions are deck state, not `GameState` — so the guard lives here,
+      // the same as the kill and the seer's check.
+      if (!room.ship) throw new engine.ContractError("no deck");
+      if (room.ship.bodies[action.victim] !== room.ship.positions[action.seat]) {
+        throw new engine.ContractError("no body here");
+      }
+      room.game = engine.reportBody(
+        g0,
+        engine.seatOf(g0, action.seat).sessionKey,
+        action.victim,
+      );
+      break;
+    }
 
     case "skipNight":
       room.game = engine.skipNight(g0);
@@ -470,7 +492,14 @@ export function tickBots(room: Room): void {
         applyAction(room, { type: "kill", seat: action.impostor, victim: action.victim });
         break;
       case "report":
-        applyAction(room, { type: "report", seat: action.seat });
+        applyAction(room, { type: "confirmDeath", seat: action.seat });
+        break;
+      case "reportBody":
+        applyAction(room, {
+          type: "reportBody",
+          seat: action.finder,
+          victim: action.victim,
+        });
         break;
       case "vote":
         applyAction(room, { type: "vote", seat: action.voter, candidate: action.candidate });
@@ -563,6 +592,12 @@ export function viewFor(room: Room, seat: number | null): ViewerState {
       // progress bar is computed from all of them, so redacting them would
       // show every player only their own three tasks as "the crew total".
       tasks: room.ship.tasks,
+      // Bodies obey the same fog as crewmates: you see the one you are standing
+      // over, nothing else. Broadcasting the map of corpses would hand everyone
+      // the murder scene without anyone having to walk there.
+      bodies: Object.fromEntries(
+        Object.entries(room.ship.bodies).filter(([, r]) => myRoom !== null && r === myRoom),
+      ) as Record<number, RoomId>,
       sightings: room.ship.sightings.filter((s) => s.observer === seat),
     };
   }

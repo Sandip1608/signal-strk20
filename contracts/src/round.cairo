@@ -228,6 +228,14 @@ pub mod SignalRound {
         hidden: Map<u32, bool>, // seat -> on the hidden team, filled at resolve
         seer: Map<u32, bool>, // seat -> is the seer, filled at resolve
         tasks_done: Map<u32, u32>, // seat -> tasks this seat has submitted
+        /// seat -> killed this round and not yet reported.
+        ///
+        /// This is what stops `report_body` degenerating into an unlimited
+        /// emergency meeting. Without it any player could "report" a corpse from
+        /// three rounds ago, or an ejected player, and open a vote at will —
+        /// which is exactly the stall `call_meeting`'s once-per-seat limit
+        /// exists to prevent.
+        unreported_body: Map<u32, bool>,
         crew_won: bool,
     }
 
@@ -499,14 +507,59 @@ pub mod SignalRound {
         /// impostor) can see it. The victim's SESSION KEY self-reports here,
         /// which opens the vote. Signed by the burner, so it links to a seat,
         /// not to a funding wallet.
-        fn report_night_kill(ref self: ContractState) {
+        /// The victim opens the kill note and attests to their own death,
+        /// signed by their SESSION KEY.
+        ///
+        /// This signature is the *only* proof of a death the contract can have:
+        /// it never learns that a kill happened, because the note moves
+        /// privately inside the pool. So death stays self-attested — otherwise
+        /// any player could declare any other player dead with a single call.
+        ///
+        /// Unlike the call it replaces, this does **not** open the vote. It
+        /// leaves a body, and the round goes on until somebody finds it. That
+        /// is what makes "where was the body" evidence exist at all, and it is
+        /// why a night can now hold more than one kill.
+        ///
+        /// The flip side of self-attestation, unchanged from the call this
+        /// replaces: a player can declare themselves dead without anyone having
+        /// killed them. The contract cannot tell the difference and never
+        /// could. It is not a griefing vector — the only seat you can end this
+        /// way is your own, at the cost of your whole round — and the client
+        /// only ever offers it to a seat holding a kill note.
+        fn confirm_death(ref self: ContractState) {
             assert(self.phase.read() == phases::NIGHT, 'not night');
             let seat = self.seat_of_session_key(get_caller_address());
             assert(!self.dead.read(seat), 'already dead');
             self.dead.write(seat, true);
-            self.night_victim_of.write(self.round_number.read(), seat + 1);
+            self.unreported_body.write(seat, true);
+        }
+
+        /// Any living player announces a body they have found, signed by their
+        /// SESSION KEY. This is what opens the vote.
+        ///
+        /// A liar cannot invent a death here: the seat must already have
+        /// attested its own, this round, and not been reported yet. The worst a
+        /// dishonest reporter achieves is calling the meeting early — which
+        /// `call_meeting` already allows, and which costs them the body.
+        ///
+        /// Where the body lay is deliberately *not* on-chain. The contract does
+        /// not need it, and the deck is off-chain state precisely so facts like
+        /// this stay out of public storage; it is evidence for the players, not
+        /// a fact the round has to agree on.
+        fn report_body(ref self: ContractState, victim_seat: u32) {
+            assert(self.phase.read() == phases::NIGHT, 'not night');
+            let finder = self.seat_of_session_key(get_caller_address());
+            assert(!self.dead.read(finder), 'dead cannot report');
+            assert(self.unreported_body.read(victim_seat), 'no body there');
+            self.unreported_body.write(victim_seat, false);
+            self.night_victim_of.write(self.round_number.read(), victim_seat + 1);
             self.open_vote();
-            self.emit(BodyReported { victim_seat: seat, vote_deadline: self.vote_deadline.read() });
+            self
+                .emit(
+                    BodyReported {
+                        victim_seat, vote_deadline: self.vote_deadline.read(),
+                    },
+                );
         }
 
         /// Submit one completed task, signed by the caller's SESSION KEY.
@@ -669,6 +722,16 @@ pub mod SignalRound {
 
             // Per-round buckets are namespaced, so advancing the counter *is*
             // the reset. Deaths and used meetings deliberately carry over.
+            // Among Us clears the deck when everyone is called in, so a body
+            // nobody found before the meeting is gone afterwards. Leaving them
+            // would let a stale corpse open a free vote next round.
+            let n = self.player_count.read();
+            let mut b: u32 = 0;
+            while b != n {
+                self.unreported_body.write(b, false);
+                b += 1;
+            }
+
             self.round_number.write(round + 1);
             // A new night starts with a stable reactor - an unfixed meltdown
             // does not survive into the next round.
@@ -922,6 +985,10 @@ pub mod SignalRound {
             self.tasks_done.read(seat)
         }
 
+        fn has_unreported_body(self: @ContractState, seat: u32) -> bool {
+            self.unreported_body.read(seat)
+        }
+
         /// Only meaningful once resolved; false before then.
         fn is_seer(self: @ContractState, seat: u32) -> bool {
             self.seer.read(seat)
@@ -1097,7 +1164,9 @@ pub trait ISignalRoundGame<T> {
     );
     fn assign_roles(ref self: T, role_commitment: felt252);
     fn start_night(ref self: T);
-    fn report_night_kill(ref self: T);
+    fn confirm_death(ref self: T);
+    fn report_body(ref self: T, victim_seat: u32);
+    fn has_unreported_body(self: @T, seat: u32) -> bool;
     fn submit_task(ref self: T);
     fn tasks_per_player(self: @T) -> u32;
     fn tasks_done_by(self: @T, seat: u32) -> u32;

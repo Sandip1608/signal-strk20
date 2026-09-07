@@ -166,6 +166,14 @@ export type GameState = {
    * the chain shows.
    */
   tasksDone: Record<number, number>;
+  /**
+   * seat -> killed this round and not yet reported. Mirrors `unreported_body`.
+   *
+   * This is what keeps `reportBody` from becoming an unlimited emergency
+   * meeting: without it anyone could "report" a corpse from three rounds ago,
+   * or an ejected player, and open a vote at will.
+   */
+  unreportedBody: Record<number, boolean>;
   /** `seat + 1`; 0 = nobody died this round. */
   nightVictim: number;
   /**
@@ -174,7 +182,7 @@ export type GameState = {
    *
    * This has no on-chain counterpart *by design* — it mirrors a note sitting
    * undecrypted in the victim's inbox inside the pool. The round contract
-   * genuinely does not know a kill happened until `report_night_kill`.
+   * genuinely does not know a kill happened until `confirm_death`.
    */
   pendingVictim: number;
 

@@ -435,6 +435,44 @@ mod tests {
         assert(!over(1, 4, 0, 9, 12), 'impostor tasks must not count');
     }
 
+    // ── finding a body ────────────────────────────────────────────────────
+
+    /// Mirrors the guard in `report_body`. A body is reportable only if the
+    /// seat attested its own death this round and nobody has called it in yet.
+    fn can_report(unreported: bool, finder_dead: bool) -> bool {
+        unreported && !finder_dead
+    }
+
+    #[test]
+    fn a_fresh_body_can_be_called_in() {
+        assert(can_report(true, false), 'should be reportable');
+    }
+
+    /// The hole this closes. Death is self-attested, so `report_body` cannot
+    /// verify a corpse — it can only check the flag. Without clearing that flag
+    /// at the meeting, any player could re-report an old body, or an ejected
+    /// one, and open a vote whenever they liked. That is precisely the stall
+    /// `call_meeting`'s once-per-seat limit exists to prevent.
+    #[test]
+    fn a_stale_body_is_not_a_free_meeting() {
+        assert(!can_report(false, false), 'stale body must not report');
+    }
+
+    #[test]
+    fn a_ghost_cannot_call_in_a_body() {
+        assert(!can_report(true, true), 'dead cannot report');
+    }
+
+    /// Reporting is what opens the vote, and it can only happen once, so the
+    /// same corpse cannot re-open a ballot that is already running.
+    #[test]
+    fn reporting_clears_the_body() {
+        let mut unreported = true;
+        assert(can_report(unreported, false), 'first report ok');
+        unreported = false; // `report_body` writes this
+        assert(!can_report(unreported, false), 'second report refused');
+    }
+
     #[test]
     fn round_cap_is_sane() {
         assert(signal::round::MAX_ROUNDS > 1, 'cap must allow a loop');

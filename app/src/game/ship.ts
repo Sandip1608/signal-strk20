@@ -237,6 +237,19 @@ export type ShipState = {
   positions: Record<number, RoomId>;
   /** seat -> that player's task list. */
   tasks: Record<number, TaskInstance[]>;
+  /**
+   * seat -> the room that seat's body is lying in.
+   *
+   * Separate from `positions` on purpose: a ghost goes on walking the deck, but
+   * the corpse stays where it fell. That is the whole point — "I found them in
+   * Reactor" is evidence, and it only means something if the body does not
+   * follow its owner around.
+   *
+   * Off-chain, like the rest of the deck. The contract records *that* somebody
+   * died and that a body was called in; where it lay is for the players to
+   * argue about, and keeping it out of public storage costs the round nothing.
+   */
+  bodies: Record<number, RoomId>;
   sightings: Sighting[];
   /**
    * Unix ms before which no kill is allowed. Set when the night opens and
@@ -378,6 +391,7 @@ export function initShip(
     positions,
     tasks,
     sightings,
+    bodies: {},
     killReadyAt: now + KILL_COOLDOWN_SECS * 1000,
     // Opens on cooldown too, so the night cannot begin in darkness.
     sabotageReadyAt: now + SABOTAGE_COOLDOWN_SECS * 1000,
@@ -463,6 +477,18 @@ export function fixLights(ship: ShipState): ShipState {
   return { ...ship, lightsOutUntil: 0 };
 }
 
+/** Lay a body where its owner is standing. Called when the victim confirms. */
+export function dropBody(ship: ShipState, seat: number): ShipState {
+  return { ...ship, bodies: { ...ship.bodies, [seat]: ship.positions[seat] } };
+}
+
+/** Bodies lying in `room` — what a player standing there can see. */
+export function bodiesIn(ship: ShipState, room: RoomId): number[] {
+  return Object.entries(ship.bodies)
+    .filter(([, r]) => r === room)
+    .map(([seat]) => Number(seat));
+}
+
 /** Travel through a vent. Impostor-only; enforced by the caller. */
 export function vent(ship: ShipState, seat: number, now = Date.now()): ShipState {
   const to = ventFrom(ship.positions[seat]);
@@ -489,6 +515,8 @@ export function resetForRound(
     ...ship,
     positions: spawnRooms(seats),
     sightings: [],
+    // A meeting clears the deck, exactly as `endVote` clears the on-chain flags.
+    bodies: {},
     killReadyAt: now + KILL_COOLDOWN_SECS * 1000,
     sabotageReadyAt: now + SABOTAGE_COOLDOWN_SECS * 1000,
     lightsOutUntil: 0,

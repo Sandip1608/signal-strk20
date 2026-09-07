@@ -256,7 +256,7 @@ export function RolePanel({ game }: { game: GameState }) {
 
 export function NightPanel({ game }: { game: GameState }) {
   const {
-    viewerSeat, revealed, setViewer, reveal, cover, kill, report, skipNight,
+    viewerSeat, revealed, setViewer, reveal, cover, kill, confirmDeath, reportBody, skipNight,
     ship, moveTo, completeTask, mode, callMeeting, useVent, sabotageLights, fixLights,
     sabotageReactor, fixReactor, investigate, mySeat,
   } = useGame();
@@ -297,8 +297,9 @@ export function NightPanel({ game }: { game: GameState }) {
   const victim =
     game.pendingVictim === 0 ? null : (game.seats[game.pendingVictim - 1] ?? null);
 
-  // The victim self-reports with their session key; that call is what opens the
-  // vote. Until then the contract knows nothing about the kill.
+  // The victim attests to their own death with their session key — the only
+  // proof of a death the contract can have, since it never learns a kill
+  // happened. It no longer opens the vote: it leaves a body for someone to find.
   if (victim && !victim.dead && (own === null || victim.seat === own)) {
     return (
       <div className={`${s.panel} ${s.alarm}`}>
@@ -321,19 +322,20 @@ export function NightPanel({ game }: { game: GameState }) {
               <p className={s.roleLabel}>Decrypted note</p>
               <p className={s.roleName}>YOU DIED</p>
               <p className={s.roleBlurb}>
-                Report it to open the vote. This is signed by your burner session key, so it links
-                to your seat — never to the wallet that paid your buy-in.
+                Open the note and you are dead — signed by your burner session key, so it links to
+                your seat and never to the wallet that paid your buy-in. Your body stays where you
+                fell, and the round runs on until somebody walks in and finds it.
               </p>
             </div>
             <button
               type="button"
               className={`${s.btn} ${s.btnDanger}`}
               onClick={() => {
-                report(victim.seat);
+                confirmDeath(victim.seat);
                 cover();
               }}
             >
-              Report my death (session key)
+              Open the note (session key)
             </button>
           </>
         )}
@@ -381,6 +383,8 @@ export function NightPanel({ game }: { game: GameState }) {
               kill(victim);
               cover();
             }}
+            bodies={ship ? ship.bodies : {}}
+            onReportBody={(v) => reportBody(viewer.seat, v)}
             partners={
               isImpostor
                 ? game.seats

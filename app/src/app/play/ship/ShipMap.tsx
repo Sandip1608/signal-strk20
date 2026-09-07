@@ -79,6 +79,8 @@ export function ShipMap({
   onInvestigate,
   canCheck,
   partners,
+  bodies,
+  onReportBody,
   onVent,
   onSabotage,
   onFixLights,
@@ -101,6 +103,9 @@ export function ShipMap({
   canCheck: boolean;
   /** Fellow impostors, so you can tell them apart in a crowded room. */
   partners: number[];
+  /** seat -> room, already fogged to what you can actually see. */
+  bodies: Record<number, RoomId>;
+  onReportBody: (victim: number) => void;
   onVent: () => void;
   onSabotage: () => void;
   onFixLights: () => void;
@@ -136,6 +141,11 @@ export function ShipMap({
   // What this seat already knows. Empty for everyone but the seer — the relay
   // redacts it, so a crewmate's copy is always `{}`.
   const known = me.checks ?? {};
+  // Corpses in your room. The relay fogs these the same way it fogs crewmates,
+  // so this is only ever what you could actually walk in on.
+  const corpsesHere = Object.entries(bodies)
+    .filter(([, room]) => room === here)
+    .map(([seat]) => Number(seat));
   const task = taskHere(ship, me.seat);
   const myTasks = ship.tasks[me.seat] ?? [];
   // One shared number, computed where every role is known. Working it out
@@ -185,6 +195,12 @@ export function ShipMap({
               <span className={s.roomName}>{room.name}</span>
 
               {mine && <span className={s.taskPip} title="You have a task here" />}
+
+              {/* A body in a room you can see. In the dark you find nothing —
+                  which is exactly what the lights sabotage is for. */}
+              {isHere && !dark && corpsesHere.length > 0 && (
+                <span className={s.bodyPip} title="A body is here" />
+              )}
 
               <span className={s.dots}>
                 {dots.map((seat) => (
@@ -281,6 +297,19 @@ export function ShipMap({
               {canKillNow
                 ? `Kill ${living.find((x) => x.seat === victim)?.name}`
                 : `Kill in ${cooldown}s`}
+            </button>
+          ))}
+
+        {!me.dead &&
+          !dark &&
+          corpsesHere.map((victim) => (
+            <button
+              key={`body-${victim}`}
+              type="button"
+              className={s.reportBody}
+              onClick={() => onReportBody(victim)}
+            >
+              Report {living.find((x) => x.seat === victim)?.name ?? `seat ${victim}`}&apos;s body
             </button>
           ))}
 

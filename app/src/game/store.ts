@@ -65,7 +65,10 @@ type Store = {
   assignRoles: () => void;
   startNight: () => void;
   kill: (victimSeat: number) => void;
-  report: (seat: number) => void;
+  /** The victim opens their note: they die and leave a body. */
+  confirmDeath: (seat: number) => void;
+  /** A living player calls in a body they are standing over. */
+  reportBody: (seat: number, victim: number) => void;
   skipNight: () => void;
   endVote: () => void;
   callMeeting: (seat: number) => void;
@@ -315,17 +318,29 @@ export const useGame = create<Store>((set, get) => ({
     set((st) => (st.ship ? { ship: ship.armKillCooldown(st.ship) } : {}));
   },
 
-  report: (seat) => {
+  confirmDeath: (seat) => {
     if (get().mode === "online") {
-      void get().send({ type: "report" });
+      void get().send({ type: "confirmDeath" });
       return;
     }
-    apply(set, (g) => {
-      const s = engine.seatOf(g, seat);
-      return engine.reportNightKill(g, s.sessionKey);
-    });
+    apply(set, (g) => engine.confirmDeath(g, engine.seatOf(g, seat).sessionKey));
     const g2 = get().game;
-    set((st) => (st.ship && g2 ? { ship: ship.withCrewProgress(st.ship, crewSeatsOf(g2)) } : {}));
+    set((st) =>
+      st.ship && g2
+        ? {
+            // The corpse stays where they fell; the ghost walks on from here.
+            ship: ship.withCrewProgress(ship.dropBody(st.ship, seat), crewSeatsOf(g2)),
+          }
+        : {},
+    );
+  },
+
+  reportBody: (seat, victim) => {
+    if (get().mode === "online") {
+      void get().send({ type: "reportBody", victim });
+      return;
+    }
+    apply(set, (g) => engine.reportBody(g, engine.seatOf(g, seat).sessionKey, victim));
   },
 
   skipNight: () => {
@@ -479,12 +494,27 @@ export const useGame = create<Store>((set, get) => ({
    * yank a human out of their own reveal screen mid-turn.
    */
   botAct: (action) => {
+    // A bot must never write to the human's error banner. It races them (both
+    // voting on the same tick, a task submitted twice) and losing that race is
+    // ordinary, not something the player did — the relay's `tickBots` swallows
+    // exactly the same way.
+    const quiet = () => set({ error: null });
     if (action.kind === "move") {
       get().moveTo(action.seat, action.to);
       return;
     }
     if (action.kind === "task") {
       get().completeTask(action.seat, action.taskId);
+      quiet();
+      return;
+    }
+    if (action.kind === "report") {
+      // Routed through the store action rather than applied inline, because a
+      // death has to leave a body on the deck and `apply` only touches `game`.
+      // Applied inline, a bot killed in a solo game died with no corpse and the
+      // round quietly had nothing left to find.
+      get().confirmDeath(action.seat);
+      quiet();
       return;
     }
     apply(set, (g) => {
@@ -495,8 +525,12 @@ export const useGame = create<Store>((set, get) => ({
           return engine.privateKill(g, action.victim);
         case "check":
           return engine.investigate(g, action.seer, action.target);
-        case "report":
-          return engine.reportNightKill(g, engine.seatOf(g, action.seat).sessionKey);
+        case "reportBody":
+          return engine.reportBody(
+            g,
+            engine.seatOf(g, action.finder).sessionKey,
+            action.victim,
+          );
         case "vote":
           return engine.handleVote(g, {
             voterSeat: action.voter,

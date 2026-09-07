@@ -93,6 +93,7 @@ export function createGame(opts: {
     ejections: {},
     ejectedWasImpostor: {},
     tasksDone: {},
+    unreportedBody: {},
     nightVictim: NO_SEAT,
     pendingVictim: NO_SEAT,
     tallies: {},
@@ -318,14 +319,18 @@ export function investigate(
 }
 
 /**
- * `report_night_kill()` — signed by the victim's SESSION KEY, not their wallet.
- * Opens the vote.
+ * `confirm_death()` — the victim opens the kill note and attests to their own
+ * death, signed by their SESSION KEY.
+ *
+ * That signature is the only proof of a death the contract can have: it never
+ * learns a kill happened, because the note moves privately inside the pool. So
+ * death stays self-attested — otherwise any player could declare any other
+ * player dead with one call.
+ *
+ * It deliberately does *not* open the vote. It leaves a body, and the round
+ * runs on until somebody finds it.
  */
-export function reportNightKill(
-  state: GameState,
-  sessionKey: string,
-  now = Date.now(),
-): GameState {
+export function confirmDeath(state: GameState, sessionKey: string): GameState {
   require_(state.phase === Phase.NIGHT, "not night");
   const victim = state.seats.find((s) => s.sessionKey === sessionKey);
   require_(victim !== undefined, "not a session key");
@@ -333,10 +338,47 @@ export function reportNightKill(
 
   const seats = state.seats.map((s) => (s.seat === victim.seat ? { ...s, dead: true } : s));
   return log(
-    openVote({ ...state, seats, nightVictim: victim.seat + 1, pendingVictim: NO_SEAT }, now),
     {
-      call: "report_night_kill",
-      text: `${victim.name} (seat ${victim.seat}) reports their own death, signed by burner ${short(sessionKey)}. Vote opens.`,
+      ...state,
+      seats,
+      pendingVictim: NO_SEAT,
+      unreportedBody: { ...state.unreportedBody, [victim.seat]: true },
+    },
+    {
+      call: "confirm_death",
+      text: `${victim.name} (seat ${victim.seat}) opened the note and is dead, signed by burner ${short(sessionKey)}. The body is still where they fell.`,
+    },
+  );
+}
+
+/**
+ * `report_body(victim_seat)` — a living player announces a body they found.
+ * This is what opens the vote.
+ *
+ * A liar cannot invent a death: the seat must already have attested its own,
+ * this round, and not been reported yet. The worst a dishonest reporter manages
+ * is calling the meeting early, which `callMeeting` already allows.
+ */
+export function reportBody(
+  state: GameState,
+  finderSessionKey: string,
+  victimSeat: number,
+  now = Date.now(),
+): GameState {
+  require_(state.phase === Phase.NIGHT, "not night");
+  const finder = state.seats.find((s) => s.sessionKey === finderSessionKey);
+  require_(finder !== undefined, "not a session key");
+  require_(!finder.dead, "dead cannot report");
+  require_(state.unreportedBody[victimSeat] === true, "no body there");
+
+  const victim = seatOf(state, victimSeat);
+  const bodies = { ...state.unreportedBody };
+  delete bodies[victimSeat];
+  return log(
+    openVote({ ...state, unreportedBody: bodies, nightVictim: victimSeat + 1 }, now),
+    {
+      call: "report_body",
+      text: `${finder.name} found ${victim.name}'s body and called it in, signed by burner ${short(finderSessionKey)}. Vote opens.`,
     },
   );
 }
@@ -508,6 +550,10 @@ export function endVote(state: GameState, now = Date.now()): GameState {
       ...state,
       seats,
       ejections: { ...state.ejections, [round]: ejected },
+      // Among Us clears the deck when everyone is called in, so a body nobody
+      // found before the meeting is gone afterwards. Leaving them would let a
+      // stale corpse open a free vote next round.
+      unreportedBody: {},
       // Computed here because this is the last place roles are in hand; the
       // relay redacts them, so the client could not work it out for itself.
       ejectedWasImpostor:
