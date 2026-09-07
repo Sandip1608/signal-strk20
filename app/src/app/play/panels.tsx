@@ -34,6 +34,7 @@ import { PublicLedger, RoleDossier } from "./stitch/role";
 import { EmergencyReport, ImpostorRadar, NightCrewBlind, NightPlayFrame } from "./stitch/night";
 import { VoteTable } from "./stitch/vote";
 import { EjectionStage, PayoutStage } from "./stitch/end";
+import { OnChainJoin } from "./OnChainJoin";
 
 // ── Lobby ──────────────────────────────────────────────────────────────────
 
@@ -56,6 +57,11 @@ export function LobbyPanel({ game }: { game: GameState }) {
     addPlayer(name.trim());
     setName("");
   };
+
+  // The wallet needs this seat's burner and entropy to join on chain. Locally
+  // there is no `mySeat`, so fall back to the only human at the table.
+  const chainSeat =
+    you ?? (mode === "local" ? (game.seats.find((x) => !x.isBot) ?? null) : null);
 
   return (
     <div className={s.panel}>
@@ -156,6 +162,8 @@ export function LobbyPanel({ game }: { game: GameState }) {
           )}
         </div>
       )}
+
+      <OnChainJoin you={chainSeat} />
     </div>
   );
 }
