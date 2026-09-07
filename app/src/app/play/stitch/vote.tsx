@@ -23,6 +23,8 @@ export function VoteTable({
   viewer,
   onPickSeat,
   onCast,
+  onPoolCast,
+  poolExplorer,
   host,
 }: {
   game: GameState;
@@ -30,12 +32,21 @@ export function VoteTable({
   viewer?: Seat | null;
   onPickSeat?: (seat: number) => void;
   onCast?: (candidate: number) => void;
+  /** Send the vote as a real STRK20 pool leg. Present only when a privacy wallet is connected. */
+  onPoolCast?: (candidate: number) => Promise<string>;
+  poolExplorer?: (tx: string) => string;
   host?: ReactNode;
 }) {
   const living = livingSeats(game);
   const committed = living.filter((x) => x.hasVoted).length;
   const victim = game.nightVictim === 0 ? null : game.seats[game.nightVictim - 1];
   const [target, setTarget] = useState<number | null>(null);
+  const [pool, setPool] = useState<
+    | { state: "idle" }
+    | { state: "sending" }
+    | { state: "sent"; tx: string }
+    | { state: "error"; message: string }
+  >({ state: "idle" });
   const max = living.reduce((m, x) => {
     const t = game.tallies[x.seat] ?? 0n;
     return t > m ? t : m;
@@ -175,7 +186,48 @@ export function VoteTable({
                 >
                   Cast shielded nullifier note
                 </button>
+                {onPoolCast && (
+                  <button
+                    type="button"
+                    className={`${s.btn} ${s.btnGhost}`}
+                    disabled={target === null || pool.state === "sending"}
+                    onClick={async () => {
+                      if (target === null) return;
+                      setPool({ state: "sending" });
+                      try {
+                        setPool({ state: "sent", tx: await onPoolCast(target) });
+                      } catch (e) {
+                        setPool({
+                          state: "error",
+                          message: e instanceof Error ? e.message : String(e),
+                        });
+                      }
+                    }}
+                  >
+                    {pool.state === "sending"
+                      ? "Wallet is proving…"
+                      : "Send through STRK20 pool (1 STRK)"}
+                  </button>
+                )}
               </div>
+              {pool.state === "sent" && (
+                <p className={st.hint} style={{ color: "#10b981", marginTop: 8 }}>
+                  Pool leg sent —{" "}
+                  {poolExplorer ? (
+                    <a href={poolExplorer(pool.tx)} target="_blank" rel="noreferrer">
+                      {short(pool.tx)}
+                    </a>
+                  ) : (
+                    short(pool.tx)
+                  )}
+                  . The escrow reports (candidate, amount); the sender stays the pool.
+                </p>
+              )}
+              {pool.state === "error" && (
+                <p className={st.hint} style={{ color: "#f87171", marginTop: 8 }}>
+                  Pool leg failed: {pool.message}
+                </p>
+              )}
             </div>
           )}
         </div>

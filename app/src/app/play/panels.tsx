@@ -39,6 +39,8 @@ import {
   settingsFromGame,
   type Settings,
 } from "@/game/variants";
+import { canVoteThroughPool, explorerTx, voteThroughPool } from "@/game/chain";
+import { useWallet } from "@/game/useWallet";
 import { PublicLedger, RoleDossier } from "./stitch/role";
 import { EmergencyReport, ImpostorRadar, NightCrewBlind, NightPlayFrame } from "./stitch/night";
 import { VoteTable } from "./stitch/vote";
@@ -636,6 +638,7 @@ export function NightPanel({ game }: { game: GameState }) {
 export function VotePanel({ game }: { game: GameState }) {
   const { viewerSeat, revealed, setViewer, reveal, cover, vote, ship, mode, continueRound, mySeat } =
     useGame();
+  const wallet = useWallet((x) => x.account);
   const pinned = ownDeviceSeat(game, mode, mySeat) !== null;
   const deadline = useDeadline(game.voteDeadline);
   // Either the clock ran out, or everyone has voted — no reason to sit and
@@ -692,6 +695,15 @@ export function VotePanel({ game }: { game: GameState }) {
           vote(viewer.seat, candidate);
           cover();
         }}
+        // The real pool leg, offered only when a privacy wallet is connected
+        // and an escrow exists on this network. Independent of the local cast:
+        // the table never waits on a wallet popup.
+        onPoolCast={
+          canVoteThroughPool(wallet)
+            ? (candidate) => voteThroughPool(wallet!, candidate)
+            : undefined
+        }
+        poolExplorer={explorerTx}
         host={
           <div className={s.btnRow}>
             <button type="button" className={`${s.btn} ${s.btnGhost}`} onClick={cover}>
