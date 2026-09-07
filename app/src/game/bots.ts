@@ -15,12 +15,15 @@ import { livingSeats } from "./engine";
 import {
   BOT_TASK_SECS,
   botDestination,
+  killReady,
+  neighbours,
   occupants,
+  sightingsFor,
   taskHere,
   type RoomId,
   type ShipState,
 } from "./ship";
-import { Phase, type GameState, type Seat } from "./types";
+import { Phase, SKIP_VOTE, type GameState, type Seat } from "./types";
 
 const BOT_NAMES = [
   "Nova", "Rhea", "Juno", "Atlas", "Vega", "Orion", "Lyra", "Pax", "Iris", "Kepler",
@@ -39,6 +42,48 @@ function others(state: GameState, self: number): Seat[] {
 
 function pick<T>(xs: T[]): T | null {
   return xs.length === 0 ? null : xs[Math.floor(Math.random() * xs.length)];
+}
+
+/**
+ * Stable 0..1 from (seat, salt). Each bot is a character with fixed habits,
+ * not a new coin flip every tick — that's what made them vote as a bloc.
+ */
+function unit(seat: number, salt: number): number {
+  const x = Math.imul(seat + 1, 0x9e3779b1) ^ Math.imul(salt + 1, 0x85ebca6b);
+  return ((x >>> 0) % 1000) / 1000;
+}
+
+type Traits = {
+  /** Chance to pile onto the current leader. 0.15–0.55, not a shared 75%. */
+  bandwagon: number;
+  /** Chance to skip when they have no strong read. */
+  skip: number;
+  /** Fraction of the vote clock they wait before casting. */
+  delay: number;
+  /** Chance to roam instead of bee-lining to a task. */
+  wander: number;
+};
+
+function traits(seat: number): Traits {
+  return {
+    bandwagon: 0.15 + unit(seat, 1) * 0.4,
+    skip: 0.1 + unit(seat, 2) * 0.28,
+    delay: 0.12 + unit(seat, 3) * 0.68,
+    wander: 0.2 + unit(seat, 4) * 0.38,
+  };
+}
+
+function voteElapsed(state: GameState, now: number): number {
+  const window = state.voteDurationSecs * 1000;
+  if (window <= 0 || state.voteDeadline === 0) return 1;
+  return Math.min(1, Math.max(0, 1 - (state.voteDeadline - now) / window));
+}
+
+function readyToVote(state: GameState, seat: number, now: number): boolean {
+  const elapsed = voteElapsed(state, now);
+  // Last tenth of the clock: remaining bots commit rather than all skip-by-timeout.
+  if (elapsed >= 0.9) return true;
+  return elapsed >= traits(seat).delay;
 }
 
 /** Living seats with votes, highest first, excluding `exclude`. */
@@ -77,15 +122,19 @@ export function chooseKill(state: GameState, impostorSeat: number): number | nul
 /**
  * Who a bot votes for.
  *
- * Both roles bandwagon onto whoever is already accumulating votes, which is
- * how real tables behave and keeps tallies converging instead of scattering
- * one-vote-each (which would tie, eject nobody, and hand the impostor a win
- * almost every round). The impostor simply never bandwagons onto itself, so
- * it deflects — the one asymmetry between the two.
+ * Used to be one shared policy (75% pile onto the leader), so four bots
+ * produced four identical ballots a beat apart. Each seat now has its own
+ * delay, skip habit and bandwagon rate, and crew weigh who they actually saw.
  */
-export function chooseVote(state: GameState, voter: Seat): number | null {
+export function chooseVote(
+  state: GameState,
+  voter: Seat,
+  ship: ShipState | null = null,
+): number | null {
   const candidates = others(state, voter.seat);
-  if (candidates.length === 0) return null;
+  if (candidates.length === 0) return SKIP_VOTE;
+
+  const t = traits(voter.seat);
 
   // A bot seer votes what it knows. Without this the role is dead weight
   // whenever the seed hands it to a bot, which at 1 seer in 6 seats is most
@@ -93,20 +142,59 @@ export function chooseVote(state: GameState, voter: Seat): number | null {
   const guilty = candidates.find((x) => voter.checks[x.seat] === true);
   if (guilty) return guilty.seat;
 
-  const BANDWAGON = 0.75;
-
   // Last voter, top currently tied: break it. A tie ejects nobody and hands the
-  // impostor the round, and no real table votes to deadlock on purpose — this
-  // is the one place bots need to act like players rather than dice.
+  // impostor the round, and no real table votes to deadlock on purpose.
   const isLastVoter = remainingVoters(state).length <= 1;
   if (isLastVoter) {
     const tied = tiedForFirst(state, voter.seat);
-    if (tied.length > 0) return pick(tied)!.seat;
+    if (tied.length > 0) {
+      const crewTied =
+        voter.role === "IMPOSTOR" ? tied.filter((x) => x.role !== "IMPOSTOR") : tied;
+      return pick(crewTied.length > 0 ? crewTied : tied)!.seat;
+    }
   }
 
+  const seen = ship
+    ? sightingsFor(ship, voter.seat).filter((s) => s.who !== voter.seat)
+    : [];
+  const cleared = new Set(seen.filter((s) => s.visual).map((s) => s.who));
+  const alibi = new Set(seen.map((s) => s.who));
+
+  const victim = state.nightVictim === 0 ? undefined : state.nightVictim - 1;
+  const killRoom = victim !== undefined && ship ? ship.bodies[victim] : undefined;
+  const seenAtKill = new Set(
+    killRoom ? seen.filter((s) => s.room === killRoom).map((s) => s.who) : [],
+  );
+
+  const open = candidates.filter((x) => !cleared.has(x.seat));
+  const pool = open.length > 0 ? open : candidates;
+
+  // Impostors never throw a partner under the bus on purpose, and they skip
+  // more often — looking indecisive is safer than joining a crew pile-on.
+  if (voter.role === "IMPOSTOR") {
+    const crew = pool.filter((x) => x.role !== "IMPOSTOR");
+    const frame = crew.filter((x) => seenAtKill.has(x.seat) || !alibi.has(x.seat));
+    if (Math.random() < t.skip + 0.12) return SKIP_VOTE;
+    const leader = currentLeader(state, voter.seat);
+    if (leader && leader.role !== "IMPOSTOR" && Math.random() < t.bandwagon) {
+      return leader.seat;
+    }
+    return pick(frame.length > 0 ? frame : crew.length > 0 ? crew : pool)?.seat ?? SKIP_VOTE;
+  }
+
+  const suspicious = pool.filter(
+    (x) => seenAtKill.has(x.seat) || !alibi.has(x.seat),
+  );
   const leader = currentLeader(state, voter.seat);
-  if (leader && Math.random() < BANDWAGON) return leader.seat;
-  return pick(candidates)?.seat ?? null;
+  if (
+    leader &&
+    !cleared.has(leader.seat) &&
+    Math.random() < t.bandwagon
+  ) {
+    return leader.seat;
+  }
+  if (Math.random() < t.skip) return SKIP_VOTE;
+  return pick(suspicious.length > 0 ? suspicious : pool)?.seat ?? SKIP_VOTE;
 }
 
 /**
@@ -125,10 +213,15 @@ export type BotAction =
   | { kind: "task"; seat: number; taskId: string }
   | { kind: "check"; seer: number; target: number };
 
-export function nextBotAction(state: GameState): BotAction | null {
+export function nextBotAction(
+  state: GameState,
+  ship: ShipState | null = null,
+  now = Date.now(),
+): BotAction | null {
   switch (state.phase) {
     case Phase.ASSIGNED: {
-      const s = state.seats.find((x) => x.isBot && !x.roleSeen);
+      const pending = state.seats.filter((x) => x.isBot && !x.roleSeen);
+      const s = pick(pending);
       return s ? { kind: "seeRole", seat: s.seat } : null;
     }
 
@@ -137,9 +230,12 @@ export function nextBotAction(state: GameState): BotAction | null {
       return null;
 
     case Phase.VOTE: {
-      const voter = state.seats.find((x) => x.isBot && !x.dead && !x.hasVoted);
+      const ready = state.seats.filter(
+        (x) => x.isBot && !x.dead && !x.hasVoted && readyToVote(state, x.seat, now),
+      );
+      const voter = pick(ready);
       if (!voter) return null;
-      const candidate = chooseVote(state, voter);
+      const candidate = chooseVote(state, voter, ship);
       return candidate === null ? null : { kind: "vote", voter: voter.seat, candidate };
     }
 
@@ -196,31 +292,29 @@ export function nextNightAction(state: GameState, ship: ShipState): BotAction | 
     }
   }
 
-  // 3. A bot impostor alone with someone takes the chance — but only once the
-  //    night is a third gone.
-  //
-  //    Without this gate the impostor kills on the first beat it shares a room
-  //    with anyone, which in testing ended the night in ~20 seconds: the human
-  //    never got to walk anywhere or finish a task, and the "what you saw"
-  //    evidence at the meeting was empty. Gating on elapsed time rather than a
-  //    move count keeps it proportional to whichever pace the host picked.
+  // 3. A bot impostor alone with someone takes the chance — but not while the
+  //    host-set kill cooldown is still running. That used to be hidden by the
+  //    UI only; bots (and a handwritten POST) skipped it, so the first shared
+  //    room ended the night.
   const elapsed = nightElapsedFraction(state);
-  const impostor = living.find((x) => x.isBot && x.role === "IMPOSTOR");
-  if (impostor && elapsed > 0.34) {
+  const impostor = pick(living.filter((x) => x.isBot && x.role === "IMPOSTOR"));
+  if (impostor && killReady(ship)) {
     const room = ship.positions[impostor.seat];
     const targets = occupants(ship, room, livingSeatNos).filter((x) => x !== impostor.seat);
     // Ramps up as the night runs out, so a kill still lands before the timer.
-    const urgency = 0.18 + 0.5 * Math.max(0, elapsed - 0.34);
+    const urgency = 0.18 + 0.5 * elapsed;
     if (targets.length > 0 && Math.random() < urgency) {
       return { kind: "kill", impostor: impostor.seat, victim: pick(targets)! };
     }
   }
 
   // 4. A bot seer spends its one check on whoever it is standing with.
-  const seer = living.find(
-    (x) => x.isBot && x.role === "SEER" && x.checkedRound !== state.roundNumber,
+  const seer = pick(
+    living.filter(
+      (x) => x.isBot && x.role === "SEER" && x.checkedRound !== state.roundNumber,
+    ),
   );
-  if (seer && elapsed > 0.2) {
+  if (seer && elapsed > 0.15 + traits(seer.seat).delay * 0.2) {
     const room = ship.positions[seer.seat];
     const near = occupants(ship, room, livingSeatNos)
       .filter((x) => x !== seer.seat)
@@ -241,22 +335,29 @@ export function nextNightAction(state: GameState, ship: ShipState): BotAction | 
   //    so without a cooldown it finishes a task every driver beat and the crew
   //    bar — which now decides the game — fills before the first body drops.
   const now = Date.now();
-  const worker = living.find(
-    (x) =>
-      x.isBot &&
-      taskHere(ship, x.seat) !== null &&
-      (state.tasksDone[x.seat] ?? 0) < state.tasksPerPlayer &&
-      now - (ship.lastTaskAt[x.seat] ?? 0) >= BOT_TASK_SECS * 1000,
+  const worker = pick(
+    living.filter(
+      (x) =>
+        x.isBot &&
+        taskHere(ship, x.seat) !== null &&
+        (state.tasksDone[x.seat] ?? 0) < state.tasksPerPlayer &&
+        now - (ship.lastTaskAt[x.seat] ?? 0) >= BOT_TASK_SECS * 1000,
+    ),
   );
   if (worker) {
     const t = taskHere(ship, worker.seat)!;
     return { kind: "task", seat: worker.seat, taskId: t.id };
   }
 
-  // 6. Otherwise somebody walks.
-  const walkers = living.filter((x) => x.isBot);
-  const walker = pick(walkers);
+  // 6. Otherwise somebody walks. Some wander; others still path to a task.
+  const walker = pick(living.filter((x) => x.isBot));
   if (!walker) return null;
+  const here = ship.positions[walker.seat];
+  if (Math.random() < traits(walker.seat).wander) {
+    const roam = neighbours(here);
+    const detour = pick(roam);
+    return detour === null ? null : { kind: "move", seat: walker.seat, to: detour };
+  }
   const to = botDestination(ship, walker.seat);
   return to === null ? null : { kind: "move", seat: walker.seat, to };
 }

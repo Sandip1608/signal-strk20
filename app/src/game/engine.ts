@@ -52,6 +52,7 @@ export function createGame(opts: {
   seerCount?: number;
   tasksPerPlayer?: number;
   confirmEjects?: boolean;
+  killCooldownSecs?: number;
   seedCommitment?: string;
 }): GameState {
   require_(opts.host.length > 0, "host required");
@@ -88,6 +89,7 @@ export function createGame(opts: {
     hostSeed: "",
     nightDurationSecs: opts.nightDurationSecs,
     voteDurationSecs: opts.voteDurationSecs,
+    killCooldownSecs: opts.killCooldownSecs ?? 20,
     nightDeadline: 0,
     voteDeadline: 0,
     roundNumber: 0,
@@ -125,6 +127,7 @@ export function configureLobby(
     seerCount?: number;
     tasksPerPlayer?: number;
     confirmEjects?: boolean;
+    killCooldownSecs?: number;
   },
 ): GameState {
   require_(state.phase === Phase.LOBBY, "not in lobby");
@@ -153,10 +156,11 @@ export function configureLobby(
       confirmEjects: opts.confirmEjects ?? state.confirmEjects,
       nightDurationSecs: opts.nightDurationSecs,
       voteDurationSecs: opts.voteDurationSecs,
+      killCooldownSecs: opts.killCooldownSecs ?? state.killCooldownSecs,
     },
     {
       call: "configure",
-      text: `Table set: ${minPlayers}–${maxPlayers} · ${hiddenCount} hidden · ${opts.nightDurationSecs}s night / ${opts.voteDurationSecs}s vote`,
+      text: `Table set: ${minPlayers}–${maxPlayers} · ${hiddenCount} hidden · ${opts.nightDurationSecs}s night / ${opts.voteDurationSecs}s vote · ${opts.killCooldownSecs ?? state.killCooldownSecs}s kill cooldown`,
     },
   );
 }
@@ -692,6 +696,24 @@ export function crewTasksWon(state: GameState, hiddenSeats: number[]): boolean {
 }
 
 /**
+ * Among Us's head-count ending: living impostors equal or outnumber living
+ * crew. Checked after a death as well as at `resolve_round`, so a kill that
+ * makes the counts even ends the round instead of waiting for a meeting.
+ */
+export function impostorsAtParity(state: GameState, hiddenSeats: number[]): boolean {
+  if (hiddenSeats.length === 0) return false;
+  const hidden = new Set(hiddenSeats);
+  let impostors = 0;
+  let crew = 0;
+  for (const x of state.seats) {
+    if (x.dead) continue;
+    if (hidden.has(x.seat)) impostors += 1;
+    else crew += 1;
+  }
+  return impostors > 0 && impostors >= crew;
+}
+
+/**
  * Mirrors `resolve_round`. The caller does the hashing (this module stays free
  * of crypto dependencies) but every check the contract makes is made here, in
  * the same order and with the same messages.
@@ -751,9 +773,9 @@ export function resolveRound(
   // crew win.
   const capped = state.roundNumber + 1 >= MAX_ROUNDS;
   if (state.phase === Phase.NIGHT) {
-    // Night may only end here if the crew actually finished their jobs —
-    // otherwise this would let anyone skip the vote.
-    require_(tasksWon, "game not over");
+    // Night may end here on a real win: the crew finished their jobs, or a
+    // kill left the impostors at parity. Anything else would skip the vote.
+    require_(tasksWon || impostorsWon, "game not over");
   } else {
     require_(impostorsAlive === 0 || impostorsWon || tasksWon || capped, "game not over");
   }

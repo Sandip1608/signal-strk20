@@ -114,6 +114,7 @@ export function createRoom(opts: {
   seerCount?: number;
   tasksPerPlayer?: number;
   confirmEjects?: boolean;
+  killCooldownSecs?: number;
 }): Room {
   sweep();
   const code = newCode();
@@ -183,6 +184,7 @@ export type Action =
       seerCount?: number;
       tasksPerPlayer?: number;
       confirmEjects?: boolean;
+      killCooldownSecs?: number;
     }
   | { type: "assignRoles" }
   | { type: "seeRole"; seat: number }
@@ -269,6 +271,7 @@ export function applyAction(room: Room, action: Action): void {
         seerCount: g0.seerCount,
         tasksPerPlayer: g0.tasksPerPlayer,
         confirmEjects: g0.confirmEjects,
+        killCooldownSecs: g0.killCooldownSecs,
         seedCommitment: seedCommitment(hostSeed),
       });
       room.hostSeed = hostSeed;
@@ -307,6 +310,7 @@ export function applyAction(room: Room, action: Action): void {
         seerCount: action.seerCount,
         tasksPerPlayer: action.tasksPerPlayer,
         confirmEjects: action.confirmEjects,
+        killCooldownSecs: action.killCooldownSecs,
       });
       break;
 
@@ -340,7 +344,12 @@ export function applyAction(room: Room, action: Action): void {
     case "startNight":
       room.game = engine.startNight(g0);
       room.ship = ship.withCrewProgress(
-        ship.initShip(room.game.seats.map((s) => s.seat), room.game.tasksPerPlayer),
+        ship.initShip(
+          room.game.seats.map((s) => s.seat),
+          room.game.tasksPerPlayer,
+          Date.now(),
+          room.game.killCooldownSecs ?? 20,
+        ),
         crewSeatsOf(room.game),
       );
       break;
@@ -465,6 +474,7 @@ export function applyAction(room: Room, action: Action): void {
           crewSeatsOf(room.game),
         );
       }
+      finishIfImpostorsWon(room);
       break;
 
     case "reportBody": {
@@ -601,6 +611,20 @@ function finishIfCrewTasksWon(room: Room): void {
   });
 }
 
+/** A kill that left the impostors at parity: open the commitment and award them. */
+function finishIfImpostorsWon(room: Room): void {
+  if (room.hiddenSeats.length === 0) return;
+  if (!engine.impostorsAtParity(room.game, room.hiddenSeats)) return;
+  if (room.game.phase !== Phase.NIGHT) return;
+  room.game = engine.resolveRound(room.game, {
+    hiddenSeats: room.hiddenSeats,
+    salt: room.salt,
+    hostSeed: room.hostSeed,
+    recomputedCommitment: poseidonCommitment(room.hiddenSeats, room.salt),
+    recomputedSeedCommitment: seedCommitment(room.hostSeed),
+  });
+}
+
 /** Only an impostor may sabotage, and not on cooldown. */
 function requireImpostor(room: Room, seat: number): void {
   const who = room.game.seats.find((x) => x.seat === seat);
@@ -667,7 +691,7 @@ export function tickBots(room: Room): void {
       ? room.ship
         ? nextNightAction(room.game, room.ship)
         : null
-      : nextBotAction(room.game);
+      : nextBotAction(room.game, room.ship);
   if (!action) return;
 
   room.lastBotAt = now;
@@ -795,6 +819,7 @@ export function viewFor(room: Room, seat: number | null, playerId: string | null
       // button looks broken rather than disabled.
       sabotageReadyAt: room.ship.sabotageReadyAt,
       crewProgress: room.ship.crewProgress,
+      killCooldownSecs: room.ship.killCooldownSecs ?? 20,
       positions,
       // Task lists are sent in full, deliberately. They carry no role
       // information — the impostor gets a list too — and the shared crew

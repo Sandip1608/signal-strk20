@@ -128,6 +128,7 @@ export type RoundOpts = {
   seerCount?: number;
   tasksPerPlayer?: number;
   confirmEjects?: boolean;
+  killCooldownSecs?: number;
 };
 
 /**
@@ -294,6 +295,7 @@ export const useGame = create<Store>((set, get) => ({
       seerCount: g.seerCount,
       tasksPerPlayer: g.tasksPerPlayer,
       confirmEjects: g.confirmEjects,
+      killCooldownSecs: g.killCooldownSecs,
     });
     for (const who of humans) get().addPlayer(who.name);
   },
@@ -340,7 +342,12 @@ export const useGame = create<Store>((set, get) => ({
       revealed: false,
       ship: g
         ? ship.withCrewProgress(
-            ship.initShip(g.seats.map((x) => x.seat), g.tasksPerPlayer),
+            ship.initShip(
+              g.seats.map((x) => x.seat),
+              g.tasksPerPlayer,
+              Date.now(),
+              g.killCooldownSecs ?? 20,
+            ),
             crewSeatsOf(g),
           )
         : null,
@@ -388,6 +395,11 @@ export const useGame = create<Store>((set, get) => ({
       void get().send({ type: "kill", victim: victimSeat });
       return;
     }
+    const st = get();
+    if (st.ship && !ship.killReady(st.ship)) {
+      set({ error: "kill on cooldown" });
+      return;
+    }
     apply(set, (g) => engine.privateKill(g, victimSeat));
     set((st) => (st.ship ? { ship: ship.armKillCooldown(st.ship) } : {}));
   },
@@ -407,6 +419,8 @@ export const useGame = create<Store>((set, get) => ({
           }
         : {},
     );
+    const g3 = get().game;
+    if (g3 && engine.impostorsAtParity(g3, g3.hiddenSeats)) get().resolve();
   },
 
   reportBody: (seat, victim) => {
@@ -647,12 +661,15 @@ export const useGame = create<Store>((set, get) => ({
       quiet();
       return;
     }
+    if (action.kind === "kill") {
+      get().kill(action.victim);
+      quiet();
+      return;
+    }
     apply(set, (g) => {
       switch (action.kind) {
         case "seeRole":
           return engine.markRoleSeen(g, action.seat);
-        case "kill":
-          return engine.privateKill(g, action.victim);
         case "check":
           return engine.investigate(g, action.seer, action.target);
         case "reportBody":

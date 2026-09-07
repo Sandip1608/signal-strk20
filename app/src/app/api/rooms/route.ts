@@ -20,6 +20,7 @@ export async function POST(req: Request) {
     seerCount?: number;
     tasksPerPlayer?: number;
     confirmEjects?: boolean;
+    killCooldownSecs?: number;
   };
 
   const room = createRoom({
@@ -31,6 +32,7 @@ export async function POST(req: Request) {
     seerCount: body.seerCount,
     tasksPerPlayer: body.tasksPerPlayer,
     confirmEjects: body.confirmEjects,
+    killCooldownSecs: clamp(body.killCooldownSecs ?? 20, 5, 60),
   });
 
   return NextResponse.json({ code: room.code });

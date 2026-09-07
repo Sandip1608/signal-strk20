@@ -258,6 +258,8 @@ export type ShipState = {
    * share a room, and the night is over before anyone has walked anywhere.
    */
   killReadyAt: number;
+  /** Seconds this table waits before (and between) kills. Host-set. */
+  killCooldownSecs: number;
   /** Unix ms before which no sabotage is allowed. */
   sabotageReadyAt: number;
   /** Unix ms the lights come back on. 0 = lights are up. */
@@ -354,6 +356,7 @@ export function initShip(
   seats: number[],
   tasksPerPlayer = DEFAULT_TASKS_PER_PLAYER,
   now = Date.now(),
+  killCooldownSecs = KILL_COOLDOWN_SECS,
 ): ShipState {
   const positions = spawnRooms(seats);
   const tasks: Record<number, TaskInstance[]> = {};
@@ -405,7 +408,8 @@ export function initShip(
     sightings,
     lastTaskAt: {},
     bodies: {},
-    killReadyAt: now + KILL_COOLDOWN_SECS * 1000,
+    killCooldownSecs,
+    killReadyAt: now + killCooldownSecs * 1000,
     // Opens on cooldown too, so the night cannot begin in darkness.
     sabotageReadyAt: now + SABOTAGE_COOLDOWN_SECS * 1000,
     lightsOutUntil: 0,
@@ -469,9 +473,13 @@ export function killCooldownLeft(ship: ShipState, now = Date.now()): number {
   return Math.max(0, Math.ceil((ship.killReadyAt - now) / 1000));
 }
 
+function cooldownSecs(ship: ShipState): number {
+  return ship.killCooldownSecs ?? KILL_COOLDOWN_SECS;
+}
+
 /** Start the cooldown again after a kill. */
 export function armKillCooldown(ship: ShipState, now = Date.now()): ShipState {
-  return { ...ship, killReadyAt: now + KILL_COOLDOWN_SECS * 1000 };
+  return { ...ship, killReadyAt: now + cooldownSecs(ship) * 1000 };
 }
 
 export function lightsOut(ship: ShipState, now = Date.now()): boolean {
@@ -541,7 +549,7 @@ export function resetForRound(
     sightings: [],
     // A meeting clears the deck, exactly as `endVote` clears the on-chain flags.
     bodies: {},
-    killReadyAt: now + KILL_COOLDOWN_SECS * 1000,
+    killReadyAt: now + cooldownSecs(ship) * 1000,
     sabotageReadyAt: now + SABOTAGE_COOLDOWN_SECS * 1000,
     lightsOutUntil: 0,
     // A new night starts with a stable reactor, matching `end_vote`.
@@ -754,7 +762,7 @@ export function botDestination(ship: ShipState, seat: number): RoomId | null {
   if (options.length === 0) return null;
 
   // Head for the room holding an outstanding task, one step at a time.
-  const target = open[0]?.room;
+  const target = open.length > 0 ? open[seat % open.length]!.room : undefined;
   if (target && target !== here) {
     const step = options.find((o) => o === target);
     if (step) return step;

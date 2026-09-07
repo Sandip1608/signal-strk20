@@ -136,6 +136,8 @@ export type GameState = {
 
   nightDurationSecs: number;
   voteDurationSecs: number;
+  /** Seconds an impostor must wait before the first kill, and between kills. */
+  killCooldownSecs: number;
   /** Unix ms. 0 = not started. */
   nightDeadline: number;
   voteDeadline: number;

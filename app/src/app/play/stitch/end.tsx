@@ -169,11 +169,11 @@ export function PayoutStage({
         ))}
       </div>
 
-      {/* A task win never went through the airlock, so skip the scene. A
-          meltdown must not narrate the last ballot as a tie either — without
-          `reactor` the caption read "nobody went out the airlock" over a round
-          the airlock had nothing to do with. */}
-      {showEjection && !(game.crewWon && game.ejected === 0) ? (
+      {/* A task win never went through the airlock, so skip the scene. A kill
+          that left the impostors at parity is the same — there was no vote.
+          A meltdown must not narrate the last ballot as a tie either. */}
+      {showEjection &&
+      !(game.ejected === 0 && game.totalVotes === 0n && !game.endedBySabotage) ? (
         <Ejection
           key={`eject-${game.roundNumber}-${game.ejected}`}
           reactor={game.endedBySabotage}

@@ -75,7 +75,8 @@ everything identifying is shielded.
    resolves or night falls again — a skip that ties or beats the leader
    ejects nobody.
 5. **Resolve.** After the deadline — or immediately when the crew finish
-   every job during the night — `resolve_round(host_seed, salt)` opens the
+   every job during the night, or when a kill leaves living impostors equal
+   to (or more than) living crew — `resolve_round(host_seed, salt)` opens the
    commitment. Ejected = strict-max tally (ties eject nobody). Crew also
    win by filling the task bar (`submit_task`, counted only over crew
    seats, ghosts included). Crew win ⇢ every crewmate (dead included)

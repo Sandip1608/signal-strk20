@@ -63,6 +63,7 @@ export async function createRoom(opts: {
   seerCount?: number;
   tasksPerPlayer?: number;
   confirmEjects?: boolean;
+  killCooldownSecs?: number;
 }): Promise<string> {
   const res = await fetch("/api/rooms", {
     method: "POST",
