@@ -146,7 +146,10 @@ standing in your own room.
 
 > ⚠️ Rooms live in process memory, so cross-device play needs **one long-lived
 > process**. It will not work on Vercel, where requests hit different
-> instances. Use Render/Railway/Fly, or tunnel to your machine.
+> instances. `render.yaml` at the repo root is a ready blueprint for Render's
+> free tier — see [`docs/DEPLOY.md`](./docs/DEPLOY.md), which also covers the
+> one thing that bites: a free service sleeps when idle, and sleeping wipes
+> every room.
 
 ### The game
 

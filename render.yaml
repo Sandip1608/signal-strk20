@@ -1,0 +1,24 @@
+# Render blueprint. Point Render at this repo and it reads this file — no
+# clicking through the dashboard, and the settings live in git where they can be
+# reviewed.
+#
+# Why a web service and not a static site or a serverless deploy: the relay in
+# `app/src/server/rooms.ts` keeps rooms in module memory. It needs one
+# long-lived process. On a platform that spreads requests across instances —
+# Vercel, or Render's own static hosting — each request could land somewhere
+# with an empty room list, and players would simply never find each other.
+services:
+  - type: web
+    name: signal-strk20
+    runtime: node
+    plan: free
+    # The Next app is not at the repo root; the repo also holds the Cairo
+    # contracts, which the app build does not need.
+    rootDir: app
+    buildCommand: npm ci && npm run build
+    # `next start` binds 0.0.0.0 and honours $PORT, which Render sets.
+    startCommand: npm start
+    healthCheckPath: /play
+    envVars:
+      - key: NODE_VERSION
+        value: "20"

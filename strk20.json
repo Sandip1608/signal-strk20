@@ -1,6 +1,24 @@
 {
-  "transactions": [],
-  "contracts": [],
+  "transactions": [
+    "0x77af790cd244bd2d1b3438de96c42e84d46a8313d78cd3c78637bdd0a66f0ba",
+    "0x63b891abbd02c636196c53192bcbacfd6013c9e79154f77403f0fdb61c681c",
+    "0x3b7b8ac93d848670038c470327e285695cc2b84a7c49e485189bed14ead4a73",
+    "0x23f07431717eb9f959084336799fcd29566ef132812b306f51554d396d859ae",
+    "0x194aae61cf7e04ee2efdccea23ae1ad426cfca29f0989ebabc83d15f9d706ea"
+  ],
+  "contracts": [
+    {
+      "name": "SignalRound",
+      "address": "0x46094f727a8550522e1df968ab539af3967c04f52baab77b1a7ded4816990db",
+      "class_hash": "0x198bb1a700df271e86b03f19b0b25f4ea767aa4a24bf0ce089550896883c69a"
+    },
+    {
+      "name": "SignalEscrow",
+      "address": "0x598020caf411af143a8b4f6f0a1693fa044e33babcfff066a3313339839d1cc",
+      "class_hash": "0x753e5400760c07bee7f64a18eb200b97d8e03f140ae7aa612d0e53b02dd1554"
+    }
+  ],
   "demo_video": "",
-  "demo_url": ""
+  "demo_url": "",
+  "network": "sepolia"
 }
