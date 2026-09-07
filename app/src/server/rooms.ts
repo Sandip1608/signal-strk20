@@ -755,6 +755,9 @@ export function viewFor(room: Room, seat: number | null, playerId: string | null
       // information — the impostor gets a list too — and the shared crew
       // progress bar is computed from all of them, so redacting them would
       // show every player only their own three tasks as "the crew total".
+      // Bot pacing only — the server runs the bots, and no client needs to
+      // know when a seat last finished something.
+      lastTaskAt: {},
       tasks: room.ship.tasks,
       // Bodies obey the same fog as crewmates: you see the one you are standing
       // over, nothing else. Broadcasting the map of corpses would hand everyone

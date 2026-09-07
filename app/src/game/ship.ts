@@ -237,6 +237,8 @@ export type ShipState = {
   positions: Record<number, RoomId>;
   /** seat -> that player's task list. */
   tasks: Record<number, TaskInstance[]>;
+  /** seat -> when that seat last finished a task. Paces the bots. */
+  lastTaskAt: Record<number, number>;
   /**
    * seat -> the room that seat's body is lying in.
    *
@@ -317,6 +319,17 @@ export const KILL_COOLDOWN_SECS = 20;
  */
 export const SABOTAGE_COOLDOWN_SECS = 30;
 
+/**
+ * Seconds a bot spends on one task.
+ *
+ * A human walks to the room and solves a minigame; a bot does neither, so it
+ * used to finish a task every driver beat — 800ms. Four bots cleared all twelve
+ * crew tasks about ten seconds into the first night, which since the task win
+ * landed no longer just filled a bar: it decided the game before anyone had
+ * played. Pacing them near a human's rate is the whole fix.
+ */
+export const BOT_TASK_SECS = 15;
+
 /** Seconds the lights stay out once sabotaged. */
 export const LIGHTS_OUT_SECS = 25;
 
@@ -391,6 +404,7 @@ export function initShip(
     positions,
     tasks,
     sightings,
+    lastTaskAt: {},
     bodies: {},
     killReadyAt: now + KILL_COOLDOWN_SECS * 1000,
     // Opens on cooldown too, so the night cannot begin in darkness.
@@ -614,7 +628,13 @@ export function completeTask(
   const mine = (ship.tasks[seat] ?? []).map((t) =>
     t.id === taskId ? { ...t, done: true } : t,
   );
-  let next: ShipState = { ...ship, tasks: { ...ship.tasks, [seat]: mine } };
+  let next: ShipState = {
+    ...ship,
+    tasks: { ...ship.tasks, [seat]: mine },
+    // Stamped only on a real completion, so an impostor's fake attempts above
+    // never start the clock that paces the bots.
+    lastTaskAt: { ...ship.lastTaskAt, [seat]: now },
+  };
 
   // A visual task is witnessed by whoever is standing there — unless the
   // lights are out (nobody can see it, exactly as `move` records no sighting

@@ -12,7 +12,14 @@
  */
 
 import { livingSeats } from "./engine";
-import { botDestination, occupants, taskHere, type RoomId, type ShipState } from "./ship";
+import {
+  BOT_TASK_SECS,
+  botDestination,
+  occupants,
+  taskHere,
+  type RoomId,
+  type ShipState,
+} from "./ship";
 import { Phase, type GameState, type Seat } from "./types";
 
 const BOT_NAMES = [
@@ -230,11 +237,16 @@ export function nextNightAction(state: GameState, ship: ShipState): BotAction | 
   //    the same one forever: the bot re-submitted it every beat, tripped the
   //    contract's per-seat cap, and the rejection surfaced on the *human's*
   //    screen as a permanent "reverted: task list already done".
+  //    They are also paced. A bot neither walks a corridor nor solves a panel,
+  //    so without a cooldown it finishes a task every driver beat and the crew
+  //    bar — which now decides the game — fills before the first body drops.
+  const now = Date.now();
   const worker = living.find(
     (x) =>
       x.isBot &&
       taskHere(ship, x.seat) !== null &&
-      (state.tasksDone[x.seat] ?? 0) < state.tasksPerPlayer,
+      (state.tasksDone[x.seat] ?? 0) < state.tasksPerPlayer &&
+      now - (ship.lastTaskAt[x.seat] ?? 0) >= BOT_TASK_SECS * 1000,
   );
   if (worker) {
     const t = taskHere(ship, worker.seat)!;
