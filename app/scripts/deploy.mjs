@@ -138,7 +138,10 @@ if (!ADDRESS || !PK) {
 }
 
 const provider = new RpcProvider({ nodeUrl: RPC });
-const account = new Account(provider, ADDRESS, PK);
+// starknet.js v10 takes an options object; the old positional form throws
+// "Cannot read properties of undefined" at construction. --dry-run never builds
+// an Account, so this only ever failed on a real run.
+const account = new Account({ provider, address: ADDRESS, signer: PK });
 const txs = [];
 
 const chainId = await provider.getChainId();
