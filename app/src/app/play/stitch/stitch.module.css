@@ -64,12 +64,21 @@
 .microOn { background: #9d4edd; color: #fff; box-shadow: 0 0 14px rgba(157, 78, 221, 0.45); }
 .microWarn { background: #93000a; color: #ffdad6; }
 
-.split {
+/* The variants only ever overrode `grid-template-columns`, so they had to be
+   written alongside `.split` to do anything — and every call site used them on
+   their own. `display` stayed `block`, the columns were ignored, and the panes
+   stacked: the vote screen ran to 1562px on a 951px viewport, putting the host's
+   Continue 474px below the fold, and the night deck sat a screen and a half
+   under the radar. Each variant now carries the grid itself. */
+.split,
+.split84,
+.split363,
+.split453 {
   display: grid;
-  grid-template-columns: minmax(0, 7fr) minmax(260px, 5fr);
   gap: 18px;
   align-items: start;
 }
+.split { grid-template-columns: minmax(0, 7fr) minmax(260px, 5fr); }
 .split84 { grid-template-columns: minmax(0, 8fr) minmax(240px, 4fr); }
 .split363 { grid-template-columns: minmax(220px, 3fr) minmax(0, 6fr) minmax(220px, 3fr); }
 .split453 { grid-template-columns: minmax(220px, 4fr) minmax(0, 5fr) minmax(220px, 3fr); }

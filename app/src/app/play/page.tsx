@@ -21,6 +21,7 @@ import { useGame } from "@/game/store";
 import { useBotDriver } from "@/game/useBotDriver";
 import { useRoomSync } from "@/game/useRoomSync";
 import { useOwnDevice } from "@/game/useOwnDevice";
+import { usePhaseScroll } from "@/game/usePhaseScroll";
 import { fetchLobbies, type LobbyListing } from "@/game/online";
 import { Phase, type GameState } from "@/game/types";
 import { impostorLabel } from "@/game/variants";
@@ -35,6 +36,9 @@ export default function PlayPage() {
   // once for everybody, or every client would fight over the same bot turn.
   useBotDriver({ enabled: mode === "local" });
   useRoomSync();
+  // Each phase is its own screen; the browser would otherwise carry your scroll
+  // position into the next one and drop you below the next thing to do.
+  usePhaseScroll();
   // One human at the table? Then the deck is theirs — open it without making
   // them tap through a gate meant for a shared screen.
   useOwnDevice();
