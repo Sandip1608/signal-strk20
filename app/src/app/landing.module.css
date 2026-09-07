@@ -271,12 +271,38 @@
   display: none;
 }
 
+/*
+ * The pool console is the starter kit's Uniswap-style panel, which is driven
+ * by CSS variables it expects on its `.page` root — a root this landing never
+ * renders, so they were undefined and the panel washed out white. CSS custom
+ * properties inherit, so redefining the whole palette here as DARK values
+ * cascades into the component and themes it to match the page, without
+ * touching the component. (uni.module.css's hardcoded #fff surfaces were
+ * pointed at var(--card) so they follow along.)
+ */
 .consoleInner {
   margin-top: 10px;
   border-radius: 18px;
   border: 1px solid #1e293b;
-  background: #f7f7f8;
+  background: #0b1020;
   padding: 8px 0 20px;
+
+  --ink: #e2e8f0;
+  --muted: #94a3b8;
+  --bg: #0b1020;
+  --card: #131a2e;
+  --line: #273449;
+  --inset: #131a2e;
+  --inset-2: #1b2338;
+  --pink: #ff7a4f;
+  --pink-soft: #2a1712;
+  --pink-soft-2: #3a1f16;
+  --pink-text: #ff9d73;
+  --green: #34d399;
+  --green-soft: #0c2a20;
+  --danger: #f87171;
+
+  color: var(--ink);
 }
 
 .footer {

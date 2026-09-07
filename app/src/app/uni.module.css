@@ -285,7 +285,7 @@
   font-size: 13px;
   font-weight: 700;
   color: var(--ink);
-  background: #fff;
+  background: var(--card);
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 7px 7px 7px 13px;
@@ -356,7 +356,7 @@
   padding: 13px 14px;
   border: 1px solid var(--line);
   border-radius: 15px;
-  background: #fff;
+  background: var(--card);
   cursor: pointer;
   text-align: left;
   transition: background 140ms, border-color 140ms;
@@ -439,7 +439,7 @@
   font-weight: 600;
   font-size: 15px;
   color: var(--ink);
-  background: #fff;
+  background: var(--card);
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 7px 15px 7px 8px;
@@ -471,7 +471,7 @@
   border-radius: 16px;
   font-size: 14px;
   color: var(--muted);
-  background: #fff;
+  background: var(--card);
 }
 .feeVal { display: inline-flex; align-items: center; gap: 7px; color: var(--ink); font-weight: 500; }
 
