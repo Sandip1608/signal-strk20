@@ -383,6 +383,13 @@ export const useGame = create<Store>((set, get) => ({
   },
 
   sabotageLights: () => {
+    // Mirrors the relay guard; the local deck is one trusted device but the
+    // two paths drifting is how a rule quietly stops applying in solo play.
+    const st0 = get();
+    if (st0.mode === "local" && st0.ship && !ship.sabotageReady(st0.ship)) {
+      set({ error: "sabotage on cooldown" });
+      return;
+    }
     if (get().mode === "online") {
       void get().send({ type: "sabotageLights" });
       return;
@@ -391,6 +398,11 @@ export const useGame = create<Store>((set, get) => ({
   },
 
   sabotageReactor: () => {
+    const st1 = get();
+    if (st1.mode === "local" && st1.ship && !ship.sabotageReady(st1.ship)) {
+      set({ error: "sabotage on cooldown" });
+      return;
+    }
     if (get().mode === "online") {
       void get().send({ type: "sabotageReactor" });
       return;

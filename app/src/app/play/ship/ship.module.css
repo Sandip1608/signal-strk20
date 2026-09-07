@@ -600,3 +600,13 @@
 .checkGuilty .taskTick { color: #ff4d5e; }
 .checkClear { color: #9fb2e8; }
 .checkClear .taskTick { color: #35d9c4; }
+
+/* A fellow impostor. Red ring, the way Among Us colours a partner's name —
+   without it you cannot tell which of the crewmates beside you is on your
+   side, and the kill you try on them is simply rejected. */
+.dotPartner {
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px #ff4d5e, 0 0 10px #ff4d5e66;
+}
+
+.sabotage:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.4); }

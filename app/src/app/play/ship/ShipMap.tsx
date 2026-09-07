@@ -22,6 +22,8 @@ import {
   ROOM_BY_ID,
   killCooldownLeft,
   killReady,
+  sabotageCooldownLeft,
+  sabotageReady,
   lightsOut,
   lightsOutLeft,
   reactorGoing,
@@ -76,6 +78,7 @@ export function ShipMap({
   canKill,
   onInvestigate,
   canCheck,
+  partners,
   onVent,
   onSabotage,
   onFixLights,
@@ -96,6 +99,8 @@ export function ShipMap({
   onInvestigate: (target: number) => void;
   /** Seer, alive, and has not spent tonight's check. */
   canCheck: boolean;
+  /** Fellow impostors, so you can tell them apart in a crowded room. */
+  partners: number[];
   onVent: () => void;
   onSabotage: () => void;
   onFixLights: () => void;
@@ -118,6 +123,8 @@ export function ShipMap({
   const canKillNow = canKill && killReady(ship);
   const cooldown = killCooldownLeft(ship);
   const ventTo = canKill ? ventFrom(ship.positions[me.seat]) : null;
+  const canSabotage = sabotageReady(ship);
+  const sabotageLeft = sabotageCooldownLeft(ship);
   const meltdown = reactorGoing(ship);
   const meltdownLeft = reactorSecsLeft(ship);
   const inReactor = ship.positions[me.seat] === "reactor";
@@ -183,7 +190,9 @@ export function ShipMap({
                 {dots.map((seat) => (
                   <span
                     key={seat}
-                    className={`${s.dot} ${seat === me.seat ? s.dotMe : ""}`}
+                    className={`${s.dot} ${seat === me.seat ? s.dotMe : ""} ${
+                      partners.includes(seat) ? s.dotPartner : ""
+                    }`}
                     // Staggered so the room does not bob in lockstep, which
                     // reads as a broken loop rather than as people standing.
                     style={{ animationDelay: `${(seat % 5) * 0.24}s` }}
@@ -257,7 +266,11 @@ export function ShipMap({
         )}
 
         {canKill &&
-          roomMates.map((victim) => (
+          // A partner cannot be killed, so do not offer it — the engine would
+          // reject it as "impostor cannot kill self", which reads as a bug.
+          roomMates
+            .filter((victim) => !partners.includes(victim))
+            .map((victim) => (
             <button
               key={victim}
               type="button"
@@ -292,14 +305,24 @@ export function ShipMap({
         )}
 
         {canKill && !dark && (
-          <button type="button" className={s.sabotage} onClick={onSabotage}>
-            Sabotage lights
+          <button
+            type="button"
+            className={s.sabotage}
+            onClick={onSabotage}
+            disabled={!canSabotage}
+          >
+            {canSabotage ? "Sabotage lights" : `Sabotage in ${sabotageLeft}s`}
           </button>
         )}
 
         {canKill && !meltdown && (
-          <button type="button" className={s.sabotage} onClick={onSabotageReactor}>
-            Sabotage reactor
+          <button
+            type="button"
+            className={s.sabotage}
+            onClick={onSabotageReactor}
+            disabled={!canSabotage}
+          >
+            {canSabotage ? "Sabotage reactor" : `Sabotage in ${sabotageLeft}s`}
           </button>
         )}
 

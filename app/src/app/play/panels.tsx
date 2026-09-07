@@ -146,6 +146,11 @@ export function RolePanel({ game }: { game: GameState }) {
 
   if (viewer && revealed) {
     const impostor = viewer.role === "IMPOSTOR";
+    // Populated for an impostor in both modes: locally every role is in state,
+    // and over the relay `viewFor` lets the IMPOSTOR label through to them.
+    const partners = impostor
+      ? game.seats.filter((x) => x.seat !== viewer.seat && x.role === "IMPOSTOR")
+      : [];
     return (
       <div className={s.panel}>
         <h2 className={s.panelTitle}>Decryption ceremony</h2>
@@ -163,7 +168,9 @@ export function RolePanel({ game }: { game: GameState }) {
           </p>
           <p className={s.roleBlurb}>
             {impostor
-              ? "Tonight you transfer the kill note to one player, privately, inside the pool. Nobody sees the sender — not even the round contract."
+              ? partners.length > 0
+                ? `You are not alone — ${partners.map((x) => x.name).join(" and ")} ${partners.length === 1 ? "is" : "are"} with you. You cannot kill each other. Tonight one of you transfers the kill note to a crewmate, privately, inside the pool.`
+                : "Tonight you transfer the kill note to one player, privately, inside the pool. Nobody sees the sender — not even the round contract."
               : viewer.role === "SEER"
                 ? "You are crew, but once each night you may check one player and learn whether they are an impostor. The answer is yours alone — the table only hears it if you say it."
                 : "Survive the night, then vote out the impostor. Your vote is anonymous; only the tally is public."}
@@ -374,6 +381,13 @@ export function NightPanel({ game }: { game: GameState }) {
               kill(victim);
               cover();
             }}
+            partners={
+              isImpostor
+                ? game.seats
+                    .filter((x) => x.seat !== viewer.seat && x.role === "IMPOSTOR")
+                    .map((x) => x.seat)
+                : []
+            }
             onInvestigate={(target) => investigate(viewer.seat, target)}
             canCheck={
               viewer.role === "SEER" &&

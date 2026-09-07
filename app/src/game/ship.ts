@@ -244,6 +244,8 @@ export type ShipState = {
    * share a room, and the night is over before anyone has walked anywhere.
    */
   killReadyAt: number;
+  /** Unix ms before which no sabotage is allowed. */
+  sabotageReadyAt: number;
   /** Unix ms the lights come back on. 0 = lights are up. */
   lightsOutUntil: number;
   /**
@@ -290,6 +292,17 @@ const SECURITY_LOG_ENTRIES = 2;
 
 /** Seconds an impostor must wait before the first (and each next) kill. */
 export const KILL_COOLDOWN_SECS = 20;
+
+/**
+ * Seconds between sabotages.
+ *
+ * There was no limit at all, so an impostor could re-cut the lights the instant
+ * they were fixed and hold the deck dark for the whole night — the crew never
+ * got a window to accrue sightings, which is the evidence the meeting runs on.
+ * Longer than the kill cooldown because a sabotage costs nothing and hits
+ * everybody at once.
+ */
+export const SABOTAGE_COOLDOWN_SECS = 30;
 
 /** Seconds the lights stay out once sabotaged. */
 export const LIGHTS_OUT_SECS = 25;
@@ -366,6 +379,8 @@ export function initShip(
     tasks,
     sightings,
     killReadyAt: now + KILL_COOLDOWN_SECS * 1000,
+    // Opens on cooldown too, so the night cannot begin in darkness.
+    sabotageReadyAt: now + SABOTAGE_COOLDOWN_SECS * 1000,
     lightsOutUntil: 0,
     reactorDeadline: 0,
     crewProgress: { done: 0, total: 0 },
@@ -387,7 +402,20 @@ export function reactorBlown(ship: ShipState, now = Date.now()): boolean {
 }
 
 export function sabotageReactor(ship: ShipState, now = Date.now()): ShipState {
-  return { ...ship, reactorDeadline: now + REACTOR_SECS * 1000 };
+  return {
+    ...ship,
+    reactorDeadline: now + REACTOR_SECS * 1000,
+    sabotageReadyAt: now + SABOTAGE_COOLDOWN_SECS * 1000,
+  };
+}
+
+/** Whether the impostor may sabotage right now. */
+export function sabotageReady(ship: ShipState, now = Date.now()): boolean {
+  return now >= ship.sabotageReadyAt;
+}
+
+export function sabotageCooldownLeft(ship: ShipState, now = Date.now()): number {
+  return Math.max(0, Math.ceil((ship.sabotageReadyAt - now) / 1000));
 }
 
 export function fixReactor(ship: ShipState): ShipState {
@@ -424,7 +452,11 @@ export function lightsOutLeft(ship: ShipState, now = Date.now()): number {
  * Electrical can restore them.
  */
 export function sabotageLights(ship: ShipState, now = Date.now()): ShipState {
-  return { ...ship, lightsOutUntil: now + LIGHTS_OUT_SECS * 1000 };
+  return {
+    ...ship,
+    lightsOutUntil: now + LIGHTS_OUT_SECS * 1000,
+    sabotageReadyAt: now + SABOTAGE_COOLDOWN_SECS * 1000,
+  };
 }
 
 export function fixLights(ship: ShipState): ShipState {
@@ -458,6 +490,7 @@ export function resetForRound(
     positions: spawnRooms(seats),
     sightings: [],
     killReadyAt: now + KILL_COOLDOWN_SECS * 1000,
+    sabotageReadyAt: now + SABOTAGE_COOLDOWN_SECS * 1000,
     lightsOutUntil: 0,
     // A new night starts with a stable reactor, matching `end_vote`.
     reactorDeadline: 0,

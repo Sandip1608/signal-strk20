@@ -382,11 +382,17 @@ export function applyAction(room: Room, action: Action): void {
   room.lastTouchedAt = Date.now();
 }
 
-/** Only an impostor may sabotage. */
+/** Only an impostor may sabotage, and not on cooldown. */
 function requireImpostor(room: Room, seat: number): void {
   const who = room.game.seats.find((x) => x.seat === seat);
   if (who?.role !== "IMPOSTOR") throw new engine.ContractError("only an impostor sabotages");
   if (who.dead) throw new engine.ContractError("dead cannot sabotage");
+  // Enforced here, not only by greying the button out: over the relay a second
+  // client can post directly, and holding the deck dark all night is the most
+  // effective thing an unlimited sabotage could do.
+  if (room.ship && !ship.sabotageReady(room.ship)) {
+    throw new engine.ContractError("sabotage on cooldown");
+  }
 }
 
 /** You must actually be standing there to fix it. */
@@ -490,11 +496,22 @@ export type ViewerState = {
 export function viewFor(room: Room, seat: number | null): ViewerState {
   const revealed = room.game.phase === Phase.RESOLVED;
 
+  // Among Us tells the impostors who their partners are. Without it a
+  // multi-impostor game is broken rather than merely harder: they cannot
+  // coordinate, and `privateKill` rejects a partner as "impostor cannot kill
+  // self", which reads as a bug to someone who was never told.
+  //
+  // Only the IMPOSTOR label crosses, and only to an impostor — a seer is not
+  // exposed to them, and crew learn nothing.
+  const viewerRole = seat === null ? undefined : room.game.seats[seat]?.role;
+  const viewerIsImpostor = viewerRole === "IMPOSTOR";
+
   const seats = room.game.seats.map((s) => {
     const mine = s.seat === seat;
+    const partner = viewerIsImpostor && s.role === "IMPOSTOR";
     return {
       ...s,
-      role: mine || revealed ? s.role : undefined,
+      role: mine || revealed || partner ? s.role : undefined,
       sessionPrivateKey: mine ? s.sessionPrivateKey : "",
       // A check result is knowledge one player had to spend their night
       // earning. Shipping it to the table would hand everyone the answer.
@@ -522,6 +539,9 @@ export function viewFor(room: Room, seat: number | null): ViewerState {
       // Everyone must see the meltdown - it is the one thing the whole crew
       // has to react to at once.
       reactorDeadline: room.ship.reactorDeadline,
+      // Without this the client cannot tell the cooldown is running and the
+      // button looks broken rather than disabled.
+      sabotageReadyAt: room.ship.sabotageReadyAt,
       crewProgress: room.ship.crewProgress,
       positions,
       // Task lists are sent in full, deliberately. They carry no role
