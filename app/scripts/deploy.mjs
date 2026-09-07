@@ -204,7 +204,14 @@ console.log(`  deployed  ${escDep.contract_address}\n            ${escDep.transa
 
 // ── 5. link them ───────────────────────────────────────────────────────────
 console.log("linking escrow to round (set_escrow)…");
-const roundContract = new Contract(round.sierra.abi, roundDep.contract_address, account);
+// v10 options form, like Account above. The positional form throws
+// "Cannot read properties of undefined (reading 'find')" — and it does so at
+// step 5, after the four transactions before it have already been paid for.
+const roundContract = new Contract({
+  abi: round.sierra.abi,
+  address: roundDep.contract_address,
+  providerOrAccount: account,
+});
 const link = await roundContract.set_escrow(escDep.contract_address);
 txs.push(link.transaction_hash);
 await provider.waitForTransaction(link.transaction_hash);
