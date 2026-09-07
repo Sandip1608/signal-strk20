@@ -139,6 +139,11 @@ their own machine. The server runs the engine and redacts per viewer: you
 receive only your own role, your own burner key, and only the crewmates
 standing in your own room.
 
+> **Sepolia.** The docs publish a testnet privacy pool "for SDK and integration
+> testing" at `0x0254a6b2997ef52e9f830ce1f543f6b29768295e8d17e2267d672c552cfe0d91`,
+> verified live, and `deploy.mjs` uses it — so a Sepolia run rehearses all five
+> transactions rather than only the two that never touch the pool.
+
 > ⚠️ Rooms live in process memory, so cross-device play needs **one long-lived
 > process**. It will not work on Vercel, where requests hit different
 > instances. Use Render/Railway/Fly, or tunnel to your machine.

@@ -37,10 +37,12 @@ const NETWORKS = {
   },
   sepolia: {
     rpc: "https://starknet-sepolia-rpc.publicnode.com",
-    // No Sepolia pool address is published in the docs. Without one, only
-    // SignalRound deploys -- which is the half with zero pool coupling anyway.
-    // Supply POOL_ADDRESS to include SignalEscrow.
-    pool: null,
+    // The docs do publish a Sepolia pool, "for SDK and integration testing".
+    // Verified live before hard-coding: class hash 0x7e2bbd...33f at this
+    // address. An earlier note here said no testnet pool existed, which meant
+    // SignalEscrow was skipped on Sepolia and the only rehearsal available was
+    // of the half that never touches the pool.
+    pool: "0x0254a6b2997ef52e9f830ce1f543f6b29768295e8d17e2267d672c552cfe0d91",
   },
 };
 
