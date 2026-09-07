@@ -136,11 +136,46 @@ export function getRoom(code: string): Room | null {
   return store.rooms.get(code.toUpperCase()) ?? null;
 }
 
+export type LobbyListing = {
+  code: string;
+  seated: number;
+  maxPlayers: number;
+  hiddenCount: number;
+  hostName: string;
+};
+
+/** Open lobbies only — in-progress rounds stay off the public board. */
+export function listLobbies(): LobbyListing[] {
+  sweep();
+  return [...store.rooms.values()]
+    .filter((room) => room.game.phase === Phase.LOBBY)
+    .sort((a, b) => b.lastTouchedAt - a.lastTouchedAt)
+    .map((room) => ({
+      code: room.code,
+      seated: room.game.seats.length,
+      maxPlayers: room.game.maxPlayers,
+      hiddenCount: room.game.hiddenCount,
+      hostName: room.game.seats[0]?.name ?? "Host",
+    }));
+}
+
 // ── actions ────────────────────────────────────────────────────────────────
 
 export type Action =
   | { type: "join"; playerId: string; name: string }
   | { type: "addBot" }
+  | { type: "resetLobby" }
+  | {
+      type: "configure";
+      nightDurationSecs: number;
+      voteDurationSecs: number;
+      minPlayers?: number;
+      maxPlayers?: number;
+      hiddenCount?: number;
+      seerCount?: number;
+      tasksPerPlayer?: number;
+      confirmEjects?: boolean;
+    }
   | { type: "assignRoles" }
   | { type: "seeRole"; seat: number }
   | { type: "startNight" }
@@ -171,6 +206,9 @@ export function applyAction(room: Room, action: Action): void {
 
   switch (action.type) {
     case "join": {
+      // One playerId, one seat — same as `joined[caller]` on-chain. A second
+      // join from this address is a no-op so a refresh cannot fill a ghost seat.
+      if (room.claims[action.playerId] !== undefined) break;
       const session = generateSessionKey();
       room.game = engine.join(g0, {
         name: action.name,
@@ -199,6 +237,63 @@ export function applyAction(room: Room, action: Action): void {
       });
       break;
     }
+
+    case "resetLobby": {
+      if (g0.phase !== Phase.LOBBY) throw new engine.ContractError("not in lobby");
+      const humans = [...g0.seats]
+        .filter((s) => !s.isBot)
+        .sort((a, b) => a.seat - b.seat);
+      const hostSeed = randomSalt();
+      room.game = engine.createGame({
+        host: "relay",
+        nightDurationSecs: g0.nightDurationSecs,
+        voteDurationSecs: g0.voteDurationSecs,
+        minPlayers: g0.minPlayers,
+        maxPlayers: g0.maxPlayers,
+        hiddenCount: g0.hiddenCount,
+        seerCount: g0.seerCount,
+        tasksPerPlayer: g0.tasksPerPlayer,
+        confirmEjects: g0.confirmEjects,
+        seedCommitment: seedCommitment(hostSeed),
+      });
+      room.hostSeed = hostSeed;
+      room.hiddenSeats = [];
+      room.salt = "";
+      room.ship = null;
+      const playerBySeat = new Map(
+        Object.entries(room.claims).map(([playerId, seat]) => [seat, playerId]),
+      );
+      const nextClaims: Record<string, number> = {};
+      for (const who of humans) {
+        const playerId = playerBySeat.get(who.seat);
+        if (!playerId) continue;
+        const session = generateSessionKey();
+        room.game = engine.join(room.game, {
+          name: who.name,
+          wallet: placeholderWallet(),
+          sessionKey: session.publicKey,
+          sessionPrivateKey: session.privateKey,
+          payoutNoteId: placeholderPayoutNote(),
+          entropy: randomEntropy(),
+        });
+        nextClaims[playerId] = room.game.seats.length - 1;
+      }
+      room.claims = nextClaims;
+      break;
+    }
+
+    case "configure":
+      room.game = engine.configureLobby(g0, {
+        nightDurationSecs: action.nightDurationSecs,
+        voteDurationSecs: action.voteDurationSecs,
+        minPlayers: action.minPlayers,
+        maxPlayers: action.maxPlayers,
+        hiddenCount: action.hiddenCount,
+        seerCount: action.seerCount,
+        tasksPerPlayer: action.tasksPerPlayer,
+        confirmEjects: action.confirmEjects,
+      });
+      break;
 
     case "assignRoles": {
       const combined = combinedSeed(
@@ -401,6 +496,8 @@ function requireIn(room: Room, seat: number, roomId: RoomId): void {
 /** Host-only actions, mirroring `assert_host` in the Cairo. */
 export const HOST_ONLY = [
   "addBot",
+  "resetLobby",
+  "configure",
   "assignRoles",
   "startNight",
   "endVote",
@@ -476,6 +573,7 @@ export type ViewerState = {
   code: string;
   version: number;
   seat: number | null;
+  isHost: boolean;
   game: GameState;
   ship: ShipState | null;
 };
@@ -487,7 +585,7 @@ export type ViewerState = {
  * is the difference between "the impostor is hidden" and "the impostor is
  * hidden unless you open devtools".
  */
-export function viewFor(room: Room, seat: number | null): ViewerState {
+export function viewFor(room: Room, seat: number | null, playerId: string | null = null): ViewerState {
   const revealed = room.game.phase === Phase.RESOLVED;
 
   const seats = room.game.seats.map((s) => {
@@ -537,6 +635,7 @@ export function viewFor(room: Room, seat: number | null): ViewerState {
     code: room.code,
     version: room.version,
     seat,
+    isHost: room.hostPlayerId !== null && room.hostPlayerId === playerId,
     game: {
       ...room.game,
       seats,

@@ -54,7 +54,7 @@ export function Crewmate({
         .filter(Boolean)
         .join(" ")}
       role="img"
-      aria-label={title ?? `Crewmate ${seat}`}
+      aria-label={title ?? `Crewmate ${seat + 1}`}
     >
       {title && <title>{title}</title>}
 

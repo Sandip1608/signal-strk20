@@ -9,28 +9,49 @@
 
 import { useState } from "react";
 import s from "./play.module.css";
-import { DeviceGate, KeyValue, STAKE_STRK, Tally, useDeadline } from "./ui";
+import { DeviceGate, useDeadline } from "./ui";
 import { ShipMap } from "./ship/ShipMap";
-import { CrewCard, Crewmate } from "./ship/Crewmate";
-import { Ejection } from "./ship/Ejection";
+import { CrewCard } from "./ship/Crewmate";
 import { ownDeviceSeat, useGame } from "@/game/store";
-import { ROOM_BY_ID, sightingsFor, tasksComplete } from "@/game/ship";
-import { ballotClosed, livingSeats, short } from "@/game/engine";
-import { SKIP_VOTE, type GameState, type Seat } from "@/game/types";
-import { CREW_NAME, IMPOSTOR_NAME, impostorLabel } from "@/game/variants";
+import { ballotClosed, livingSeats } from "@/game/engine";
+import { displaySeat, type GameState } from "@/game/types";
+import {
+  MAX_IMPOSTORS,
+  MAX_TASKS,
+  MIN_IMPOSTORS,
+  MIN_TASKS,
+  PACES,
+  PLAYER_CEILING,
+  impostorLabel,
+  minPlayersFor,
+  normalise,
+  optsFromSettings,
+  settingsFromGame,
+  type Settings,
+} from "@/game/variants";
+import { PublicLedger, RoleDossier } from "./stitch/role";
+import { EmergencyReport, ImpostorRadar, NightCrewBlind, NightPlayFrame } from "./stitch/night";
+import { VoteTable } from "./stitch/vote";
+import { EjectionStage, PayoutStage } from "./stitch/end";
 
 // ── Lobby ──────────────────────────────────────────────────────────────────
 
 export function LobbyPanel({ game }: { game: GameState }) {
-  const { addPlayer, addBot, fillWithBots, assignRoles } = useGame();
+  const {
+    addPlayer, addBot, fillWithBots, resetLobby, assignRoles, configureLobby,
+    mode, mySeat, isHost,
+  } = useGame();
   const [name, setName] = useState("");
 
   const full = game.seats.length >= game.maxPlayers;
   const enough = game.seats.length >= game.minPlayers;
+  const seated = mode === "online" && mySeat !== null;
+  const you = seated ? game.seats.find((x) => x.seat === mySeat) : null;
+  const admin = mode !== "online" || isHost;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || full) return;
+    if (!name.trim() || full || seated) return;
     addPlayer(name.trim());
     setName("");
   };
@@ -42,38 +63,63 @@ export function LobbyPanel({ game }: { game: GameState }) {
         Each player shields their buy-in, generates a burner session key in this browser, and
         pre-creates the open note their payout will land in. {game.minPlayers}–
         {game.maxPlayers} players · {game.hiddenCount}{" "}
-        {impostorLabel(game.hiddenCount).toLowerCase()} · {game.tasksPerPlayer} tasks each.
+        {impostorLabel(game.hiddenCount).toLowerCase()} · {game.nightDurationSecs}s night /{" "}
+        {game.voteDurationSecs}s vote.
       </p>
 
-      <form onSubmit={submit} className={s.btnRow} style={{ marginTop: 0 }}>
-        <input
-          className={s.input}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={full ? "Lobby full" : "Player name"}
-          disabled={full}
-          maxLength={18}
-          aria-label="Player name"
-        />
-        <button type="submit" className={s.btn} disabled={full || !name.trim()}>
-          Join seat {game.seats.length}
-        </button>
-      </form>
+      {admin ? (
+        <HostSettings game={game} onChange={configureLobby} />
+      ) : (
+        <p className={s.note} style={{ marginBottom: 16 }}>
+          <strong>Host is setting the table.</strong> {game.minPlayers}–{game.maxPlayers} seats ·{" "}
+          {game.hiddenCount} {impostorLabel(game.hiddenCount).toLowerCase()} ·{" "}
+          {game.tasksPerPlayer} tasks · {game.nightDurationSecs}s night / {game.voteDurationSecs}s
+          vote.
+        </p>
+      )}
 
-      <div className={s.btnRow}>
-        <button type="button" className={`${s.btn} ${s.btnGhost}`} onClick={addBot} disabled={full}>
-          + Add bot
-        </button>
-        <button
-          type="button"
-          className={`${s.btn} ${s.btnGhost}`}
-          onClick={fillWithBots}
-          disabled={enough}
-        >
-          Fill to {game.minPlayers} with bots
-        </button>
-        <span className={s.tagline}>Bots play their own turns — enough to run a round solo</span>
-      </div>
+      {seated ? (
+        <p className={s.tagline} style={{ display: "block", margin: "0 0 14px" }}>
+          Seated as <strong>{you?.name ?? `Seat ${displaySeat(mySeat ?? 0)}`}</strong> — one seat per address.
+        </p>
+      ) : (
+        <form onSubmit={submit} className={s.btnRow} style={{ marginTop: 0 }}>
+          <input
+            className={s.input}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={full ? "Lobby full" : "Player name"}
+            disabled={full}
+            maxLength={18}
+            aria-label="Player name"
+          />
+          <button type="submit" className={s.btn} disabled={full || !name.trim()}>
+            Join seat {displaySeat(game.seats.length)}
+          </button>
+        </form>
+      )}
+
+      {admin && (
+        <div className={s.btnRow}>
+          <button type="button" className={`${s.btn} ${s.btnGhost}`} onClick={addBot} disabled={full}>
+            + Add bot
+          </button>
+          <button
+            type="button"
+            className={`${s.btn} ${s.btnGhost}`}
+            onClick={fillWithBots}
+            disabled={enough}
+          >
+            Fill to {game.minPlayers} with bots
+          </button>
+          {game.seats.some((x) => x.isBot) && (
+            <button type="button" className={`${s.btn} ${s.btnGhost}`} onClick={resetLobby}>
+              Reset lobby
+            </button>
+          )}
+          <span className={s.tagline}>Bots play their own turns — enough to run a round solo</span>
+        </div>
+      )}
 
       {game.seats.length > 0 && (
         <div className={s.crewRow}>
@@ -96,17 +142,165 @@ export function LobbyPanel({ game }: { game: GameState }) {
         </p>
       </div>
 
-      <div className={s.btnRow}>
-        <button type="button" className={s.btn} onClick={assignRoles} disabled={!enough}>
-          Assign roles &amp; commit
-        </button>
-        {!enough && (
-          <span className={s.tagline}>
-            {game.minPlayers - game.seats.length} more player
-            {game.minPlayers - game.seats.length === 1 ? "" : "s"} needed
+      {admin && (
+        <div className={s.btnRow}>
+          <button type="button" className={s.btn} onClick={assignRoles} disabled={!enough}>
+            Assign roles &amp; commit
+          </button>
+          {!enough && (
+            <span className={s.tagline}>
+              {game.minPlayers - game.seats.length} more player
+              {game.minPlayers - game.seats.length === 1 ? "" : "s"} needed
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HostSettings({
+  game,
+  onChange,
+}: {
+  game: GameState;
+  onChange: (opts: ReturnType<typeof optsFromSettings>) => void;
+}) {
+  const settings = settingsFromGame(game);
+  const floor = Math.max(minPlayersFor(settings.impostors), game.seats.length);
+  const apply = (patch: Partial<Settings>) => onChange(optsFromSettings(normalise({ ...settings, ...patch })));
+
+  return (
+    <div className={s.section} style={{ marginBottom: 18 }}>
+      <h3 className={s.panelTitle} style={{ fontSize: 15 }}>
+        Round settings
+      </h3>
+      <p className={s.panelHint}>
+        Only you can change these while the lobby is open. Impostors, table size and timers are
+        constructor arguments; tasks and Confirm Ejects are client-side.
+      </p>
+      <div className={s.settings}>
+        <Stepper
+          label="Impostors"
+          value={settings.impostors}
+          min={MIN_IMPOSTORS}
+          max={MAX_IMPOSTORS}
+          onChange={(n) => apply({ impostors: n })}
+          hint={`needs ${minPlayersFor(settings.impostors)}+ players`}
+        />
+        <Stepper
+          label="Max players"
+          value={settings.maxPlayers}
+          min={floor}
+          max={PLAYER_CEILING}
+          onChange={(n) => apply({ maxPlayers: n })}
+        />
+        <Stepper
+          label="Tasks each"
+          value={settings.tasksPerPlayer}
+          min={MIN_TASKS}
+          max={MAX_TASKS}
+          onChange={(n) => apply({ tasksPerPlayer: n })}
+        />
+        <div className={s.setting}>
+          <span className={s.settingLabel}>
+            Seer
+            <span className={s.settingHint}>
+              {settings.seer
+                ? "one crewmate checks one player each night"
+                : "no investigative role — vanilla Among Us"}
+            </span>
           </span>
-        )}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={settings.seer}
+            onClick={() => apply({ seer: !settings.seer })}
+            className={`${s.toggle} ${settings.seer ? s.toggleOn : ""}`}
+          >
+            <span className={s.toggleKnob} />
+          </button>
+        </div>
+        <div className={s.setting}>
+          <span className={s.settingLabel}>
+            Confirm ejects
+            <span className={s.settingHint}>
+              {settings.confirmEjects
+                ? "the reveal says if they were an impostor"
+                : "the reveal stays silent — much harder"}
+            </span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={settings.confirmEjects}
+            onClick={() => apply({ confirmEjects: !settings.confirmEjects })}
+            className={`${s.toggle} ${settings.confirmEjects ? s.toggleOn : ""}`}
+          >
+            <span className={s.toggleKnob} />
+          </button>
+        </div>
       </div>
+      <div className={s.btnRow} style={{ marginTop: 10 }}>
+        {PACES.map((o) => (
+          <button
+            key={o.key}
+            type="button"
+            onClick={() => apply({ nightSecs: o.night, voteSecs: o.vote })}
+            className={`${s.btn} ${
+              settings.nightSecs === o.night && settings.voteSecs === o.vote ? "" : s.btnGhost
+            }`}
+          >
+            {o.label} · {o.night >= 120 ? `${Math.round(o.night / 60)}m` : `${o.night}s`} night
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Stepper({
+  label,
+  hint,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (n: number) => void;
+}) {
+  return (
+    <div className={s.setting}>
+      <span className={s.settingLabel}>
+        {label}
+        {hint && <span className={s.settingHint}>{hint}</span>}
+      </span>
+      <span className={s.stepper}>
+        <button
+          type="button"
+          className={s.stepBtn}
+          onClick={() => onChange(value - 1)}
+          disabled={value <= min}
+          aria-label={`Fewer ${label}`}
+        >
+          −
+        </button>
+        <span className={s.stepValue}>{value}</span>
+        <button
+          type="button"
+          className={s.stepBtn}
+          onClick={() => onChange(value + 1)}
+          disabled={value >= max}
+          aria-label={`More ${label}`}
+        >
+          +
+        </button>
+      </span>
     </div>
   );
 }
@@ -118,8 +312,6 @@ export function RolePanel({ game }: { game: GameState }) {
     useGame();
   const pinned = ownDeviceSeat(game, mode, mySeat) !== null;
 
-  const pending = game.seats.filter((x) => !x.roleSeen);
-  const allSeen = pending.length === 0;
   // When the screen belongs to one player the viewer is permanently pinned to
   // their seat (there is no device to pass), so "have you looked yet" is what
   // decides the card-vs-roster view — otherwise the card would never clear and
@@ -145,103 +337,24 @@ export function RolePanel({ game }: { game: GameState }) {
   }
 
   if (viewer && revealed) {
-    const impostor = viewer.role === "IMPOSTOR";
     return (
-      <div className={s.panel}>
-        <h2 className={s.panelTitle}>Decryption ceremony</h2>
-        <p className={s.panelHint}>
-          Assignment note opened locally. Only this seat&apos;s viewing key can read it.
-        </p>
-        <div className={`${s.roleCard} ${impostor ? s.roleImpostor : s.roleCrew}`}>
-          <span className={s.seal} aria-hidden>🔒</span>
-          <Crewmate seat={viewer.seat} size={88} title={viewer.name} />
-          <p className={s.roleLabel}>
-            {impostor ? "Sealed envelope · impostor" : "Commendation note"} · seat {viewer.seat}
-          </p>
-          <p className={s.roleName}>
-            {impostor ? IMPOSTOR_NAME : viewer.role === "SEER" ? "SEER" : CREW_NAME}
-          </p>
-          <p className={s.roleBlurb}>
-            {impostor
-              ? "Tonight you transfer the kill note to one player, privately, inside the pool. Nobody sees the sender — not even the round contract."
-              : viewer.role === "SEER"
-                ? "You are crew, but once each night you may check one player and learn whether they are an impostor. The answer is yours alone — the table only hears it if you say it."
-                : "Survive the night, then vote out the impostor. Your vote is anonymous; only the tally is public."}
-          </p>
-          {impostor && (
-            <div className={s.perkList}>
-              <div className={s.perk}>
-                <div className={s.perkName}>Night kill</div>
-                <div className={s.perkHint}>Private transfer — only from the same room, after cooldown.</div>
-              </div>
-              <div className={s.perk}>
-                <div className={s.perkName}>Vents &amp; sabotage</div>
-                <div className={s.perkHint}>Untraceable travel, lights out, reactor meltdown.</div>
-              </div>
-            </div>
-          )}
-          <div className={s.enclave}>
-            <p className={s.enclaveLabel}>Client-side proof enclave · private to you</p>
-            <KeyValue k="Burner session" v={short(viewer.sessionKey)} />
-            <KeyValue k="Payout note" v={short(viewer.payoutNoteId)} />
-            <KeyValue k="Shielded bond" v={`${STAKE_STRK}.00 STRK`} />
-          </div>
-        </div>
-        <button
-          type="button"
-          className={s.btn}
-          onClick={() => {
-            seeRole(viewer.seat);
-            cover();
-          }}
-        >
-          Commit &amp; seal role
-        </button>
-      </div>
+      <RoleDossier
+        game={game}
+        viewer={viewer}
+        onCommit={() => {
+          seeRole(viewer.seat);
+          cover();
+        }}
+      />
     );
   }
 
   return (
-    <div className={s.panel}>
-      <h2 className={s.panelTitle}>Roles assigned</h2>
-      <p className={s.panelHint}>
-        The host drew the impostor and posted <code>poseidon(impostor_seat, salt)</code> on-chain.
-        That binds the draw — the host cannot re-pick after seeing the vote — without revealing it.
-        {mode === "online"
-          ? " Waiting for everyone to open their own note on their own device."
-          : " Each player now opens their own encrypted note."}
-      </p>
-
-      <div className={s.crewRow}>
-        {game.seats.map((x) => (
-          <CrewCard
-            key={x.seat}
-            seat={x.seat}
-            name={x.name}
-            faded={x.roleSeen}
-            onClick={() => setViewer(x.seat)}
-            disabled={x.roleSeen || x.isBot}
-            tag={
-              x.isBot
-                ? x.roleSeen ? "opened" : "opening…"
-                : x.roleSeen ? "opened" : "tap to open"
-            }
-          />
-        ))}
-      </div>
-
-      <div className={s.section}>
-        <KeyValue k="Commitment" v={short(game.roleCommitment, 10, 6)} />
-        <KeyValue k="Notes opened" v={`${game.seats.length - pending.length} / ${game.seats.length}`} />
-      </div>
-
-      <div className={s.btnRow}>
-        <button type="button" className={s.btn} onClick={startNight} disabled={!allSeen}>
-          Start night
-        </button>
-        {!allSeen && <span className={s.tagline}>{pending.length} still to open their note</span>}
-      </div>
-    </div>
+    <PublicLedger
+      game={game}
+      onOpen={setViewer}
+      onStartNight={startNight}
+    />
   );
 }
 
@@ -253,7 +366,6 @@ export function NightPanel({ game }: { game: GameState }) {
     ship, moveTo, completeTask, mode, callMeeting, useVent, sabotageLights, fixLights,
     sabotageReactor, fixReactor, investigate, mySeat,
   } = useGame();
-  const online = mode === "online";
   const own = ownDeviceSeat(game, mode, mySeat);
   const nightOver = useDeadline(game.nightDeadline);
 
@@ -268,18 +380,13 @@ export function NightPanel({ game }: { game: GameState }) {
   if (breakDue) {
     const who = ejectedLast === 0 ? null : game.seats[ejectedLast - 1];
     return (
-      <div className={s.panel}>
-        <h2 className={s.panelTitle}>Round {lastRound + 1} — the airlock</h2>
-        <Ejection
-          ejected={who ? { seat: who.seat, name: who.name } : null}
-          caught={game.ejectedWasImpostor[lastRound] ?? false}
-          hiddenLabelSingular={IMPOSTOR_NAME}
-          tied={ejectedLast === 0}
-          confirmEjects={game.confirmEjects}
-          final={null}
-          onDone={() => setWatchedBreak(game.roundNumber)}
-        />
-      </div>
+      <EjectionStage
+        game={game}
+        who={who ?? null}
+        caught={game.ejectedWasImpostor[lastRound] ?? false}
+        tied={ejectedLast === 0}
+        onDone={() => setWatchedBreak(game.roundNumber)}
+      />
     );
   }
 
@@ -293,44 +400,27 @@ export function NightPanel({ game }: { game: GameState }) {
   // The victim self-reports with their session key; that call is what opens the
   // vote. Until then the contract knows nothing about the kill.
   if (victim && !victim.dead && (own === null || victim.seat === own)) {
-    return (
-      <div className={`${s.panel} ${s.alarm}`}>
-        <p className={s.alarmBanner}>Emergency · body report</p>
-        <h2 className={s.panelTitle}>A note arrived</h2>
-        <p className={s.panelHint}>
-          The kill note moved inside the pool. Only its recipient can decrypt it — the round
-          contract still knows nothing.
-        </p>
-        {!revealed ? (
+    if (!revealed) {
+      return (
+        <div className={s.panel}>
+          <h2 className={s.panelTitle}>A note arrived</h2>
           <DeviceGate
             who={victim.name}
             hint="You received a private note. Open it away from the others."
             onReveal={reveal}
           />
-        ) : (
-          <>
-            <div className={`${s.roleCard} ${s.roleImpostor}`}>
-              <Crewmate seat={victim.seat} size={72} dead title={victim.name} />
-              <p className={s.roleLabel}>Decrypted note</p>
-              <p className={s.roleName}>YOU DIED</p>
-              <p className={s.roleBlurb}>
-                Report it to open the vote. This is signed by your burner session key, so it links
-                to your seat — never to the wallet that paid your buy-in.
-              </p>
-            </div>
-            <button
-              type="button"
-              className={`${s.btn} ${s.btnDanger}`}
-              onClick={() => {
-                report(victim.seat);
-                cover();
-              }}
-            >
-              Report my death (session key)
-            </button>
-          </>
-        )}
-      </div>
+        </div>
+      );
+    }
+    return (
+      <EmergencyReport
+        game={game}
+        victim={victim}
+        onReport={() => {
+          report(victim.seat);
+          cover();
+        }}
+      />
     );
   }
 
@@ -350,28 +440,36 @@ export function NightPanel({ game }: { game: GameState }) {
   if (viewer && revealed) {
     const isImpostor = viewer.role === "IMPOSTOR";
     return (
-      <div className={s.panel}>
-          <h2 className={s.panelTitle}>
-            {isImpostor ? "Night shroud — target picker" : "Night shroud — eyes closed"}
-          </h2>
-        <p className={s.panelHint}>
-          {viewer.dead
-            ? "You are a ghost. You can still finish your tasks, but nobody can see you and you cannot vote."
-            : isImpostor
-              ? "Walk the deck. You can only kill someone standing in the same room as you — and the note moves privately inside the pool, so no transaction names you or your target."
-              : "Walk the deck and finish your tasks. Note who you see and where — that is all the crew will have to argue from at the meeting."}
-        </p>
-
+      <NightPlayFrame
+        game={game}
+        me={viewer}
+        secondsLeft={nightOver.secondsLeft}
+        impostor={!!isImpostor}
+      >
+        {isImpostor && ship && !viewer.dead && (
+          <ImpostorRadar
+            game={game}
+            ship={ship}
+            me={viewer}
+            onKill={(v) => {
+              kill(v);
+              cover();
+            }}
+            onVent={() => useVent(viewer.seat)}
+            onSabotageLights={sabotageLights}
+            onSabotageReactor={sabotageReactor}
+          />
+        )}
         {ship ? (
           <ShipMap
             ship={ship}
             me={viewer}
             living={livingSeats(game)}
-            canKill={isImpostor && !viewer.dead}
+            canKill={!!isImpostor && !viewer.dead}
             onMove={(to) => moveTo(viewer.seat, to)}
             onCompleteTask={(taskId) => completeTask(viewer.seat, taskId)}
-            onKill={(victim) => {
-              kill(victim);
+            onKill={(v) => {
+              kill(v);
               cover();
             }}
             onInvestigate={(target) => investigate(viewer.seat, target)}
@@ -387,13 +485,11 @@ export function NightPanel({ game }: { game: GameState }) {
             canCallMeeting={!viewer.calledMeeting && !viewer.dead}
             onSabotageReactor={sabotageReactor}
             onFixReactor={fixReactor}
-            isImpostor={isImpostor}
+            isImpostor={!!isImpostor}
           />
         ) : (
           <p className={s.panelHint}>The deck is not ready.</p>
         )}
-
-        {/* Nothing to hide from when the screen has one owner. */}
         {own === null && (
           <div className={s.btnRow}>
             <button type="button" className={`${s.btn} ${s.btnGhost}`} onClick={cover}>
@@ -401,49 +497,19 @@ export function NightPanel({ game }: { game: GameState }) {
             </button>
           </div>
         )}
-      </div>
+      </NightPlayFrame>
     );
   }
 
   return (
-    <div className={s.panel}>
-      <h2 className={s.panelTitle}>Night</h2>
-      <p className={s.panelHint}>
-        Pass the device around every living player in turn. Crew see nothing; the impostor picks a
-        target. Passing to everyone is what stops the impostor being identified by how long the
-        device was held.
-      </p>
-
-      <div className={s.crewRow}>
-        {game.seats.map((x) => (
-          <CrewCard
-            key={x.seat}
-            seat={x.seat}
-            name={x.name}
-            dead={x.dead}
-            onClick={() => setViewer(x.seat)}
-            disabled={x.isBot}
-            tag={x.dead ? "ghost — tasks only" : x.isBot ? "on its own" : "tap when holding"}
-          />
-        ))}
-      </div>
-
-      <div className={s.btnRow}>
-        <button
-          type="button"
-          className={`${s.btn} ${s.btnGhost}`}
-          onClick={skipNight}
-          disabled={!nightOver.passed}
-        >
-          {nightOver.passed ? "Skip night (host)" : `Skip in ${nightOver.secondsLeft}s`}
-        </button>
-        <span className={s.tagline}>
-          {nightOver.passed
-            ? "No body was reported. Call the meeting anyway."
-            : "Only once the night runs out — until then, someone may still be killed."}
-        </span>
-      </div>
-    </div>
+    <NightCrewBlind
+      game={game}
+      secondsLeft={nightOver.secondsLeft}
+      onPick={setViewer}
+      onSkip={skipNight}
+      canSkip={nightOver.passed}
+      skipLabel={nightOver.passed ? "Skip night (host)" : `Skip in ${nightOver.secondsLeft}s`}
+    />
   );
 }
 
@@ -452,7 +518,6 @@ export function NightPanel({ game }: { game: GameState }) {
 export function VotePanel({ game }: { game: GameState }) {
   const { viewerSeat, revealed, setViewer, reveal, cover, vote, resolve, ship, mode, endVote, mySeat } =
     useGame();
-  const online = mode === "online";
   const pinned = ownDeviceSeat(game, mode, mySeat) !== null;
   const deadline = useDeadline(game.voteDeadline);
   // Either the clock ran out, or everyone has voted — no reason to sit and
@@ -486,312 +551,69 @@ export function VotePanel({ game }: { game: GameState }) {
 
   if (viewer && revealed) {
     return (
-      <div className={s.panel}>
-        <h2 className={s.panelTitle}>{viewer.name} — cast a shielded vote</h2>
-        <p className={s.panelHint}>
-          Your stake is withdrawn to the escrow through <code>privacy_invoke</code>. The escrow
-          reports only <code>(candidate, amount)</code> to the tally; you stay inside the pool&apos;s
-          anonymity set.
-        </p>
-        {ship && <Witnessed game={game} ship={ship} seat={viewer.seat} />}
-
-        <div className={s.crewRow}>
-          {living
-            .filter((x) => x.seat !== viewer.seat)
-            .map((x) => (
-              <CrewCard
-                key={x.seat}
-                seat={x.seat}
-                name={x.name}
-                onClick={() => vote(viewer.seat, x.seat)}
-                // Only a seer ever has a check to show — everyone else's copy
-                // is redacted to `{}` before it leaves the server.
-                tag={
-                  x.seat in viewer.checks
-                    ? viewer.checks[x.seat]
-                      ? "you checked — IMPOSTOR"
-                      : "you checked — clear"
-                    : "cast nullifier"
-                }
-              />
-            ))}
-        </div>
-
-        {/* Abstaining is a real Among Us move: without it every round forces
-            an accusation even when nobody has evidence. It is an ordinary
-            anonymous leg that names the SKIP_VOTE sentinel. */}
-        <div className={s.btnRow}>
-          <button
-            type="button"
-            className={`${s.btn} ${s.btnGhost}`}
-            onClick={() => vote(viewer.seat, SKIP_VOTE)}
-          >
-            Skip — eject nobody
-          </button>
-          <span className={s.tagline}>
-            If skips match or beat the top accusation, nobody goes out the airlock.
-          </span>
-        </div>
-        <div className={s.btnRow}>
-          <button type="button" className={`${s.btn} ${s.btnGhost}`} onClick={cover}>
-            Cancel
-          </button>
-        </div>
-      </div>
+      <VoteTable
+        game={game}
+        ship={ship}
+        viewer={viewer}
+        onCast={(candidate) => {
+          vote(viewer.seat, candidate);
+          cover();
+        }}
+        host={
+          <div className={s.btnRow}>
+            <button type="button" className={`${s.btn} ${s.btnGhost}`} onClick={cover}>
+              Cancel
+            </button>
+          </div>
+        }
+      />
     );
   }
 
   return (
-    <div className={s.panel}>
-      <h2 className={s.panelTitle}>Discussion &amp; vote table</h2>
-      <p className={s.panelHint}>
-        {game.nightVictim === 0
-          ? "Nobody was reported dead. Vote anyway."
-          : `${game.seats[game.nightVictim - 1]?.name} was found dead. Vote to eject.`}{" "}
-        Living players vote once each.
-      </p>
-
-      <div className={s.tableWrap}>
-        <div className={s.orbit}>
-          <div className={s.orbitCore}>Nullifier circuit active</div>
-          {game.seats.map((x) => (
-            <CrewCard
-              key={x.seat}
-              seat={x.seat}
-              name={x.name}
-              dead={x.dead}
-              faded={x.hasVoted}
-              onClick={() => setViewer(x.seat)}
-              disabled={x.dead || x.hasVoted || x.isBot}
-              tag={
-                x.dead
-                  ? "dead"
-                  : x.hasVoted
-                    ? "voted"
-                    : x.isBot
-                      ? "deciding…"
-                      : "tap to vote"
-              }
-            />
-          ))}
+    <VoteTable
+      game={game}
+      ship={ship}
+      onPickSeat={setViewer}
+      host={
+        <div className={s.btnRow}>
+          <button
+            type="button"
+            className={`${s.btn} ${s.btnGhost}`}
+            onClick={endVote}
+            disabled={!voteClosed.passed}
+          >
+            {voteClosed.passed ? "Next round (host)" : `Next round in ${voteClosed.secondsLeft}s`}
+          </button>
+          <button type="button" className={s.btn} onClick={resolve} disabled={!voteClosed.passed}>
+            {voteClosed.passed ? "Reveal & resolve (host)" : `Reveal in ${voteClosed.secondsLeft}s`}
+          </button>
+          <span className={s.tagline}>
+            {!voteClosed.passed
+              ? `${toVote.length} still to vote — or wait out the clock`
+              : everyoneVoted
+                ? "Everyone has voted. No need to wait for the clock."
+                : "Ballot closed. Play on, or open the commitment to finish."}
+          </span>
         </div>
-
-        <div className={s.section} style={{ marginTop: 0 }}>
-          <h3 className={s.panelTitle} style={{ fontSize: 14, marginBottom: 8 }}>
-            Public tally ledger
-          </h3>
-          <Tally game={game} />
-          <p className={s.tagline} style={{ display: "block", marginTop: 6 }}>
-            Skip: {String(game.skipTally)} — nobody is ejected unless one player beats this.
-          </p>
-        </div>
-      </div>
-
-      <div className={s.btnRow}>
-        <button
-          type="button"
-          className={`${s.btn} ${s.btnGhost}`}
-          onClick={endVote}
-          disabled={!voteClosed.passed}
-        >
-          {voteClosed.passed ? "Next round (host)" : `Next round in ${voteClosed.secondsLeft}s`}
-        </button>
-        <button type="button" className={s.btn} onClick={resolve} disabled={!voteClosed.passed}>
-          {voteClosed.passed
-            ? "Reveal & resolve (host)"
-            : `Reveal in ${voteClosed.secondsLeft}s`}
-        </button>
-        <span className={s.tagline}>
-          {!voteClosed.passed
-            ? // The host actions assert `ballot_closed()`, so they stay disabled
-              // rather than firing a call that can only revert.
-              `${toVote.length} still to vote — or wait out the clock`
-            : everyoneVoted
-              ? "Everyone has voted. No need to wait for the clock."
-              : "Ballot closed. Play on, or open the commitment to finish — resolving before the game is actually over is rejected."}
-        </span>
-      </div>
-    </div>
+      }
+    />
   );
 }
-
-/**
- * What one player personally saw during the night.
- *
- * This is the whole reason the deck and the tasks exist: the round is still
- * decided by the on-chain vote, but walking around to do tasks is what
- * generates the evidence people vote on. Each player sees only their own
- * sightings — pooling them is what the argument at the table is for.
- */
-function Witnessed({
-  game,
-  ship,
-  seat,
-}: {
-  game: GameState;
-  ship: NonNullable<ReturnType<typeof useGame.getState>["ship"]>;
-  seat: number;
-}) {
-  const all = sightingsFor(ship, seat);
-  const nameOf = (n: number) => game.seats.find((x) => x.seat === n)?.name ?? `Seat ${n}`;
-
-  // Collapse repeats: "saw Nova in Reactor" three times is one fact.
-  const collapse = (xs: typeof all) => {
-    const out: { who: number; room: string }[] = [];
-    for (const sg of xs) {
-      const room = ROOM_BY_ID[sg.room].name;
-      if (!out.some((u) => u.who === sg.who && u.room === room)) out.push({ who: sg.who, room });
-    }
-    return out;
-  };
-
-  const witnessed = collapse(all.filter((x) => !x.viaLog && !x.visual));
-  const proven = collapse(all.filter((x) => x.visual));
-  const fromLog = collapse(all.filter((x) => x.viaLog));
-  const finished = tasksComplete(ship, seat);
-  const phrase = (u: { who: number; room: string }) => `${nameOf(u.who)} in ${u.room}`;
-
-  return (
-    <div className={s.section}>
-      <p className={s.note}>
-        <strong>What you saw.</strong>{" "}
-        {witnessed.length === 0
-          ? "Nobody — you were alone all night. That also means nobody can vouch for you."
-          : `${witnessed.slice(0, 6).map(phrase).join(" · ")}.`}
-      </p>
-
-      {/* A visual task is the only hard evidence in the game: an impostor can
-          never complete anything, so watching someone finish one clears them. */}
-      {proven.length > 0 && (
-        <p className={s.note} style={{ marginTop: 8, borderColor: "#1f6f63" }}>
-          <strong>You watched them finish a task.</strong>{" "}
-          {proven.map(phrase).join(" · ")}. Only crew can complete a task, so that clears them.
-        </p>
-      )}
-
-      {/* Finishing your task list buys evidence. It does not change who wins —
-          that is still whatever resolve_round computes from the vote. */}
-      {fromLog.length > 0 && (
-        <p className={s.note} style={{ marginTop: 8, borderColor: "#3a3560" }}>
-          <strong>Security log.</strong>{" "}
-          <span style={{ color: "#b78bff" }}>Unlocked by finishing your tasks.</span>{" "}
-          {fromLog.map(phrase).join(" · ")}. You did not see this yourself.
-        </p>
-      )}
-      {fromLog.length === 0 && !finished && (
-        <p className={s.tagline} style={{ display: "block", marginTop: 8 }}>
-          Finish your task list next round — it opens the security log and shows you movements you
-          did not witness.
-        </p>
-      )}
-    </div>
-  );
-}
-
-// ── Resolved ───────────────────────────────────────────────────────────────
 
 export function ResolvedPanel({ game }: { game: GameState }) {
   const { payout, resetGame } = useGame();
   const [paid, setPaid] = useState(false);
 
-  // The whole impostor team, not just one seat — a round may have two or three.
-  const hidden = game.hiddenSeats;
-  const hiddenSeatObjs = game.seats.filter((x) => hidden.includes(x.seat));
-  const ejected: Seat | undefined =
-    game.ejected === 0 ? undefined : game.seats.find((x) => x.seat === game.ejected - 1);
-
   return (
-    <div className={s.panel}>
-      <div className={`${s.victory} ${game.crewWon ? s.victoryCrew : s.victoryImpostor}`}>
-        <p className={s.victoryKicker}>Phase 07 · escrow settlement</p>
-        <p className={s.victoryTitle}>
-          {game.crewWon ? "Crew victory" : "Impostor victory"}
-        </p>
-        <p className={s.victorySub}>
-          {game.crewWon
-            ? "The hidden seats were ejected or outnumbered. The pot credits to living crew as shielded notes."
-            : "Parity or sabotage. The pot routes to impostor nullifiers — never a public transfer."}
-        </p>
-      </div>
-      <Ejection
-        ejected={ejected ? { seat: ejected.seat, name: ejected.name } : null}
-        caught={ejected !== undefined && hidden.includes(ejected.seat)}
-        hiddenLabelSingular={IMPOSTOR_NAME}
-        tied={game.ejected === 0}
-        confirmEjects={game.confirmEjects}
-        final={{ crewWon: game.crewWon, teamNames: hiddenSeatObjs.map((x) => x.name) }}
-      />
-
-      <div className={s.crewRow}>
-        {game.seats.map((x) => (
-          <CrewCard
-            key={x.seat}
-            seat={x.seat}
-            name={x.name}
-            dead={x.dead}
-            faded={!hidden.includes(x.seat) && !game.crewWon}
-            tag={
-              hidden.includes(x.seat)
-                ? IMPOSTOR_NAME.toLowerCase()
-                : game.crewWon
-                  ? `${CREW_NAME.toLowerCase()} · paid`
-                  : CREW_NAME.toLowerCase()
-            }
-          />
-        ))}
-      </div>
-
-      <div className={s.btnRow}>
-        <button
-          type="button"
-          className={s.btn}
-          onClick={() => {
-            payout();
-            setPaid(true);
-          }}
-          disabled={paid}
-        >
-          {paid ? "Pot credited" : "Pay out the pot"}
-        </button>
-        <button type="button" className={`${s.btn} ${s.btnGhost}`} onClick={resetGame}>
-          New round
-        </button>
-        {paid && (
-          <span className={s.tagline}>
-            Credited to each winner&apos;s open note as a shielded balance — never a public transfer.
-          </span>
-        )}
-      </div>
-
-      {/* The proof still matters, but it is reference material, not the story —
-          so it sits folded away under the scene rather than above it. */}
-      <details className={s.proof}>
-        <summary className={s.proofSummary}>Verify this round</summary>
-        <div className={s.proofBody}>
-          <p className={s.panelHint}>
-            Recompute <code>poseidon(hidden_seats…, salt)</code> from the values below and
-            compare with the commitment posted before anyone voted. They match, so the host could
-            not have swapped the impostor after seeing the tally.
-          </p>
-          <KeyValue k="Commitment" v={short(game.roleCommitment, 12, 8)} />
-          <KeyValue k="Salt (revealed)" v={short(game.salt, 12, 8)} />
-          <KeyValue
-            k={`${impostorLabel(game.hiddenCount)} seat${game.hiddenCount === 1 ? "" : "s"}`}
-            v={hidden.join(", ")}
-          />
-          {game.seerCount > 0 && (
-            <KeyValue
-              k={`Seer seat${game.seerCount === 1 ? "" : "s"}`}
-              v={game.seerSeats.join(", ") || "—"}
-            />
-          )}
-          <KeyValue k="Total votes" v={String(game.totalVotes)} />
-          <KeyValue
-            k="Winners"
-            v={`${game.crewWon ? game.seats.length - game.hiddenCount : game.hiddenCount} of ${game.seats.length}`}
-          />
-        </div>
-      </details>
-    </div>
+    <PayoutStage
+      game={game}
+      paid={paid}
+      onPayout={() => {
+        payout();
+        setPaid(true);
+      }}
+      onReset={resetGame}
+    />
   );
 }

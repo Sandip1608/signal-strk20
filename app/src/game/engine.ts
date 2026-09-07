@@ -19,6 +19,7 @@ import {
   SKIP_VOTE,
   Phase,
   VOTE_WEIGHT,
+  displaySeat,
   type GameState,
   type LogEntry,
   type PhaseValue,
@@ -104,6 +105,59 @@ export function createGame(opts: {
   };
 }
 
+/**
+ * Host retunes constructor fields while the lobby is still open.
+ *
+ * Not an on-chain entrypoint — Cairo bakes these into the constructor — so
+ * this is the pre-deploy equivalent: same asserts, same seats, new table size.
+ */
+export function configureLobby(
+  state: GameState,
+  opts: {
+    nightDurationSecs: number;
+    voteDurationSecs: number;
+    minPlayers?: number;
+    maxPlayers?: number;
+    hiddenCount?: number;
+    seerCount?: number;
+    tasksPerPlayer?: number;
+    confirmEjects?: boolean;
+  },
+): GameState {
+  require_(state.phase === Phase.LOBBY, "not in lobby");
+
+  const minPlayers = opts.minPlayers ?? state.minPlayers;
+  const maxPlayers = opts.maxPlayers ?? state.maxPlayers;
+  const hiddenCount = opts.hiddenCount ?? state.hiddenCount;
+  const seerCount = opts.seerCount ?? state.seerCount;
+
+  require_(minPlayers >= FLOOR_PLAYERS, "min too small");
+  require_(maxPlayers <= CEIL_PLAYERS, "max too large");
+  require_(minPlayers <= maxPlayers, "min above max");
+  require_(hiddenCount >= 1, "need a hidden team");
+  require_(hiddenCount * 2 < minPlayers, "hidden team too large");
+  require_(hiddenCount + seerCount < minPlayers, "too many special roles");
+  require_(state.seats.length <= maxPlayers, "too many seated");
+
+  return log(
+    {
+      ...state,
+      minPlayers,
+      maxPlayers,
+      hiddenCount,
+      seerCount,
+      tasksPerPlayer: opts.tasksPerPlayer ?? state.tasksPerPlayer,
+      confirmEjects: opts.confirmEjects ?? state.confirmEjects,
+      nightDurationSecs: opts.nightDurationSecs,
+      voteDurationSecs: opts.voteDurationSecs,
+    },
+    {
+      call: "configure",
+      text: `Table set: ${minPlayers}–${maxPlayers} · ${hiddenCount} hidden · ${opts.nightDurationSecs}s night / ${opts.voteDurationSecs}s vote`,
+    },
+  );
+}
+
 /** `set_escrow` — host-only, once. */
 export function setEscrow(state: GameState, escrow: string): GameState {
   require_(state.escrow === "", "escrow already set");
@@ -143,7 +197,7 @@ export function join(
 
   const next: Seat = {
     seat,
-    name: p.name.trim() || `Seat ${seat}`,
+    name: p.name.trim() || `Seat ${displaySeat(seat)}`,
     isBot: p.isBot ?? false,
     wallet: p.wallet,
     sessionKey: p.sessionKey,
@@ -162,7 +216,7 @@ export function join(
     { ...state, seats: [...state.seats, next] },
     {
       call: "join",
-      text: `${next.name}${next.isBot ? " (bot)" : ""} took seat ${seat} — buy-in shielded, burner ${short(p.sessionKey)} registered`,
+      text: `${next.name}${next.isBot ? " (bot)" : ""} took seat ${displaySeat(seat)} — buy-in shielded, burner ${short(p.sessionKey)} registered`,
     },
   );
 }
@@ -318,7 +372,7 @@ export function reportNightKill(
     openVote({ ...state, seats, nightVictim: victim.seat + 1, pendingVictim: NO_SEAT }, now),
     {
       call: "report_night_kill",
-      text: `${victim.name} (seat ${victim.seat}) reports their own death, signed by burner ${short(sessionKey)}. Vote opens.`,
+      text: `${victim.name} (seat ${displaySeat(victim.seat)}) reports their own death, signed by burner ${short(sessionKey)}. Vote opens.`,
     },
   );
 }
@@ -404,7 +458,7 @@ export function handleVote(
       call: "privacy_invoke → handle_vote",
       text: skipping
         ? `An anonymous vote leg declined to accuse anyone. Skips now ${skipTally}. Voter stays inside the pool.`
-        : `An anonymous vote leg landed on seat ${p.candidateSeat}. Tally now ${tallies[p.candidateSeat]}. Voter stays inside the pool.`,
+        : `An anonymous vote leg landed on seat ${displaySeat(p.candidateSeat)}. Tally now ${tallies[p.candidateSeat]}. Voter stays inside the pool.`,
       private: true,
     },
   );
@@ -579,10 +633,10 @@ export function resolveRound(
     {
       call: "resolve_round",
       text:
-        `Commitment opened: the hidden team was ${p.hiddenSeats.join(", ")}. ` +
+        `Commitment opened: the hidden team was ${p.hiddenSeats.map(displaySeat).join(", ")}. ` +
         (ejected === 0
           ? "The vote tied — nobody was ejected, so the impostor survives."
-          : `Seat ${ejected - 1} was ejected.`) +
+          : `Seat ${ejected} was ejected.`) +
         ` ${crewWon ? "Crew win." : "Impostor wins."}`,
     },
   );

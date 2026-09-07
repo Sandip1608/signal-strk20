@@ -29,7 +29,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ code: string }>
   const playerId = new URL(req.url).searchParams.get("playerId");
   tickBots(room);
 
-  return NextResponse.json(jsonSafe(viewFor(room, seatOfPlayer(room, playerId))));
+  return NextResponse.json(jsonSafe(viewFor(room, seatOfPlayer(room, playerId), playerId)));
 }
 
 /**
@@ -93,5 +93,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
   }
 
   tickBots(room);
-  return NextResponse.json(jsonSafe(viewFor(room, claimed)));
+  // Read the claim after the action: `join` just created it, and `resetLobby`
+  // may have reindexed it. The pre-action value would leave a new joiner
+  // looking unseated and able to submit a second entry.
+  return NextResponse.json(jsonSafe(viewFor(room, seatOfPlayer(room, action.playerId ?? null), action.playerId ?? null)));
 }

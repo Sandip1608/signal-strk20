@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { createRoom } from "@/server/rooms";
+import { createRoom, listLobbies } from "@/server/rooms";
+
+/** Open lobbies anyone can join from the landing page. */
+export async function GET() {
+  return NextResponse.json({ rooms: listLobbies() });
+}
 
 /** Rooms live in process memory, so this must never be cached or prerendered. */
 export const dynamic = "force-dynamic";
