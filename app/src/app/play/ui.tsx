@@ -78,8 +78,13 @@ const PHASE_STEPS: { id: PhaseValue | "payout"; label: string }[] = [
   { id: "payout", label: "Payout" },
 ];
 
-/** Conceptual buy-in shown in the HUD — the contract does not store a stake amount. */
-export const STAKE_STRK = 50;
+/**
+ * The buy-in shown across the HUD, vote and payout screens. Set to the real
+ * stake a pool vote leg shields (1 STRK) so the displayed pot equals what
+ * actually moves on-chain, not a conceptual figure. The contract stores no
+ * stake amount itself.
+ */
+export const STAKE_STRK = 1;
 
 export function GameHud({
   game,

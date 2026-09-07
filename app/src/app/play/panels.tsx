@@ -712,8 +712,24 @@ export function VotePanel({ game }: { game: GameState }) {
             ? async (onStep) => {
                 onStep("Host is starting the round…");
                 const r = await fetch("/api/chain/advance", { method: "POST" });
-                const j = (await r.json()) as { error?: string };
+                const j = (await r.json()) as {
+                  error?: string;
+                  salt?: string;
+                  impostorSeats?: number[];
+                };
                 if (!r.ok) throw new Error(j.error ?? `advance HTTP ${r.status}`);
+                // Keep the reveal salt and the impostor hint for the on-chain
+                // settle on the payout screen. localStorage so they survive the
+                // screen change and the 240s ballot wait. The salt is public at
+                // resolve anyway; the host seed stays server-side.
+                try {
+                  const round = DEPLOYMENT!.round;
+                  if (j.salt) localStorage.setItem(`signal.salt.${round}`, j.salt);
+                  if (j.impostorSeats)
+                    localStorage.setItem(`signal.imp.${round}`, JSON.stringify(j.impostorSeats));
+                } catch {
+                  // private mode etc. — the settle step will ask for the salt.
+                }
                 onStep("Your session account is calling the meeting…");
                 return openMeetingFromSession({
                   sessionKey: viewer.sessionKey,
@@ -784,6 +800,7 @@ export function VotePanel({ game }: { game: GameState }) {
 
 export function ResolvedPanel({ game }: { game: GameState }) {
   const { payout, resetGame, ejectionDone, dismissEjection, mode, isHost } = useGame();
+  const wallet = useWallet((x) => x.account);
   const [paid, setPaid] = useState(false);
 
   return (
@@ -798,6 +815,36 @@ export function ResolvedPanel({ game }: { game: GameState }) {
       resetLabel={mode === "online" && !isHost ? "Leave table" : "Return to lobby"}
       showEjection={!ejectionDone}
       onEjectionDone={dismissEjection}
+      // Resolve the on-chain round: the host reveals the seed, the contract
+      // re-derives the impostor and sets the winners. Needs the salt the
+      // advance step stashed and a live deployment.
+      onSettleOnChain={
+        DEPLOYMENT && canVoteThroughPool(wallet)
+          ? async () => {
+              let salt: string | null = null;
+              try {
+                salt = localStorage.getItem(`signal.salt.${DEPLOYMENT!.round}`);
+              } catch {
+                salt = null;
+              }
+              if (!salt) throw new Error("no reveal salt — open the on-chain ballot first");
+              const r = await fetch("/api/chain/resolve", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ salt }),
+              });
+              const j = (await r.json()) as {
+                error?: string;
+                transaction?: string;
+                crewWon?: boolean;
+                winners?: number;
+              };
+              if (!r.ok || !j.transaction) throw new Error(j.error ?? `resolve HTTP ${r.status}`);
+              return { tx: j.transaction, crewWon: !!j.crewWon, winners: j.winners ?? 0 };
+            }
+          : undefined
+      }
+      settleExplorer={explorerTx}
     />
   );
 }

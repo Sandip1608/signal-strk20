@@ -6,6 +6,7 @@ import { ROOM_BY_ID, sightingsFor, tasksComplete, type ShipState } from "@/game/
 import { CrewCard, Crewmate } from "../ship/Crewmate";
 import { Ceremony, MicroTracker, AnonSet, beanId, visor } from "./chrome";
 import { STAKE_STRK } from "../ui";
+import { DEPLOYMENT } from "@/game/deployed";
 import st from "./stitch.module.css";
 import s from "../play.module.css";
 
@@ -276,6 +277,26 @@ export function VoteTable({
                       240s clock runs out.
                     </p>
                   )}
+                  {ballot.state === "open" && (() => {
+                    let names = "";
+                    try {
+                      const raw = DEPLOYMENT
+                        ? localStorage.getItem(`signal.imp.${DEPLOYMENT.round}`)
+                        : null;
+                      const seats: number[] = raw ? JSON.parse(raw) : [];
+                      names = seats
+                        .map((n) => game.seats.find((x) => x.seat === n)?.name ?? `seat ${n}`)
+                        .join(", ");
+                    } catch {
+                      names = "";
+                    }
+                    return names ? (
+                      <p className={st.hint} style={{ color: "#fbbf24", marginTop: 4 }}>
+                        Rehearsal: to settle the round on-chain as a crew win, cast your pool vote
+                        for <strong>{names}</strong> (the seed-derived impostor).
+                      </p>
+                    ) : null;
+                  })()}
                   {ballot.state === "error" && (
                     <p className={st.hint} style={{ color: "#f87171", marginTop: 6 }}>
                       Could not open the ballot: {ballot.message}

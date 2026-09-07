@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { GameState, Seat } from "@/game/types";
 import { Phase } from "@/game/types";
 import { livingSeats, short, isWinner } from "@/game/engine";
@@ -116,6 +117,8 @@ export function PayoutStage({
   resetLabel = "Return to lobby",
   showEjection,
   onEjectionDone,
+  onSettleOnChain,
+  settleExplorer,
 }: {
   game: GameState;
   paid: boolean;
@@ -124,7 +127,16 @@ export function PayoutStage({
   resetLabel?: string;
   showEjection: boolean;
   onEjectionDone: () => void;
+  /** Resolve the round on-chain (host reveal). Present only with a deployment + wallet. */
+  onSettleOnChain?: () => Promise<{ tx: string; crewWon: boolean; winners: number }>;
+  settleExplorer?: (tx: string) => string;
 }) {
+  const [settle, setSettle] = useState<
+    | { state: "idle" }
+    | { state: "settling" }
+    | { state: "done"; tx: string; crewWon: boolean; winners: number }
+    | { state: "error"; message: string }
+  >({ state: "idle" });
   const hidden = game.hiddenSeats;
   const hiddenObjs = game.seats.filter((x) => hidden.includes(x.seat));
   const winners = game.seats.filter((x) => isWinner(game, x.seat));
@@ -216,6 +228,49 @@ export function PayoutStage({
             <p className={st.hint} style={{ marginTop: 8 }}>
               Credited to each winner&apos;s open note — never a public transfer.
             </p>
+          )}
+          {onSettleOnChain && (
+            <div style={{ marginTop: 12, borderTop: "1px solid #ffffff1a", paddingTop: 12 }}>
+              <button
+                type="button"
+                className={`${s.btn} ${s.btnGhost}`}
+                disabled={settle.state === "settling" || settle.state === "done"}
+                onClick={async () => {
+                  setSettle({ state: "settling" });
+                  try {
+                    const r = await onSettleOnChain();
+                    setSettle({ state: "done", ...r });
+                  } catch (e) {
+                    setSettle({
+                      state: "error",
+                      message: e instanceof Error ? e.message : String(e),
+                    });
+                  }
+                }}
+              >
+                {settle.state === "settling" ? "Resolving on-chain…" : "Settle round on-chain (host reveal)"}
+              </button>
+              {settle.state === "done" && (
+                <p className={st.hint} style={{ color: "#10b981", marginTop: 6 }}>
+                  Round resolved on-chain —{" "}
+                  {settleExplorer ? (
+                    <a href={settleExplorer(settle.tx)} target="_blank" rel="noreferrer">
+                      {short(settle.tx)}
+                    </a>
+                  ) : (
+                    short(settle.tx)
+                  )}
+                  . {settle.crewWon ? "Crew win" : "Impostor win"} · {settle.winners} winner
+                  {settle.winners === 1 ? "" : "s"} set on the contract. Roles revealed against the
+                  seed commitment — provably fair.
+                </p>
+              )}
+              {settle.state === "error" && (
+                <p className={st.hint} style={{ color: "#f87171", marginTop: 6 }}>
+                  Could not resolve: {settle.message}
+                </p>
+              )}
+            </div>
           )}
         </aside>
         <aside className={st.card}>
