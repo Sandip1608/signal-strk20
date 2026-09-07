@@ -50,3 +50,7 @@ A1priv/A1priv.ts
 
 # Deploy credentials — never commit
 .env.deploy
+
+.cursor/
+.claude/
+stitch/*
