@@ -300,9 +300,9 @@ export default function WalletAccountV6Tag() {
   const handleShield = async () => {
     setResultShield(null);
     const actions: WALLET_API.STRK20_ACTION[] = [
-      { type: "deposit", token: TOKEN, amount: num.toHex(TEN_STRK) },
+      { type: "deposit", token: TOKEN, amount: num.toHex(ONE_STRK) },
     ];
-    await submit(actions, setResultShield, "10 STRK");
+    await submit(actions, setResultShield, "1 STRK");
   };
 
   const handleUnshield = async () => {
@@ -488,7 +488,7 @@ export default function WalletAccountV6Tag() {
     TabKey,
     { label: string; value: string; token: string; hint: string; cta: string; onRun: () => void; result: ActionResult | null; disabled: boolean }
   > = {
-    shield: { label: "You're shielding", value: "10", token: "STRK", hint: "Deposit into the privacy pool", cta: "Shield", onRun: handleShield, result: resultShield, disabled: !isStrk20Network },
+    shield: { label: "You're shielding", value: "1", token: "STRK", hint: "Deposit into the privacy pool", cta: "Shield", onRun: handleShield, result: resultShield, disabled: !isStrk20Network },
     send: { label: "You're sending - to self", value: "1", token: "STRK", hint: "Private in-pool transfer", cta: "Self transfer", onRun: handleSelfTransfer, result: resultTransfer, disabled: !isStrk20Network },
     unshield: { label: "You're unshielding", value: "1", token: "STRK", hint: "Withdraw to your account", cta: "Unshield", onRun: handleUnshield, result: resultUnshield, disabled: !isStrk20Network },
     echo: { label: "Echo invoke round-trip", value: "5", token: "STRK", hint: "Withdraw → helper → refill open note", cta: "Run echo", onRun: handleComplex, result: resultComplex, disabled: !isStrk20Network || !hasEchoHelper },

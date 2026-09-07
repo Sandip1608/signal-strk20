@@ -19,8 +19,12 @@ import { DEPLOYMENT } from "@/game/deployed";
 
 export const dynamic = "force-dynamic";
 
-/** Enough for one account deploy + one call_meeting on Sepolia, with slack. */
-const TOP_UP_WEI = 3n * 10n ** 18n;
+/**
+ * One account deploy + one call_meeting is well under 0.1 STRK of gas on
+ * Starknet; 1 STRK is a safe floor with margin. Kept small on purpose — the
+ * same amount is what a mainnet run would top up per player.
+ */
+const TOP_UP_WEI = 1n * 10n ** 18n;
 const STRK = "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d";
 
 function hostKeys(): { address: string; pk: string } | null {
