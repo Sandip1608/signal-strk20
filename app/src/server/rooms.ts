@@ -70,9 +70,17 @@ type Store = { rooms: Map<string, Room> };
 const g = globalThis as unknown as { __signalRooms?: Store };
 const store: Store = (g.__signalRooms ??= { rooms: new Map() });
 
-/** Living non-impostors — the seats the shared crew bar counts. */
+/**
+ * Every non-impostor seat — the seats the shared crew bar counts.
+ *
+ * Ghosts included, deliberately. A dead crewmate's finished tasks still filled
+ * the bar, and they can go on filling it, which is the whole reason ghosts keep
+ * a task list. Dropping them would also put the bar out of step with the
+ * contract, whose task-win target is computed over every crew seat: the bar
+ * could read full while `resolve_round` still answered "game not over".
+ */
 function crewSeatsOf(game: GameState): number[] {
-  return game.seats.filter((x) => !x.dead && x.role !== "IMPOSTOR").map((x) => x.seat);
+  return game.seats.filter((x) => x.role !== "IMPOSTOR").map((x) => x.seat);
 }
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no I/O/0/1
@@ -246,9 +254,14 @@ export function applyAction(room: Room, action: Action): void {
       }
       break;
 
-    case "task":
+    case "task": {
+      const me = g0.seats.find((x) => x.seat === action.seat);
+      // The on-chain half. Submitted by everyone, impostors included — the
+      // contract cannot tell them apart until the roles open, and discards
+      // theirs then. Its own per-seat cap is what stops anyone inflating the
+      // bar, so a rejection here is a real rule, not bookkeeping.
+      room.game = engine.submitTask(g0, engine.seatOf(g0, action.seat).sessionKey);
       if (room.ship) {
-        const me = g0.seats.find((x) => x.seat === action.seat);
         room.ship = ship.withCrewProgress(
           ship.completeTask(room.ship, action.seat, action.taskId, {
             isImpostor: me?.role === "IMPOSTOR",
@@ -258,6 +271,7 @@ export function applyAction(room: Room, action: Action): void {
         );
       }
       break;
+    }
 
     case "kill": {
       // Every one of these was enforced only by hiding the button. Over the

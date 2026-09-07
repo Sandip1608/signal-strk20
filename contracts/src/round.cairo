@@ -176,6 +176,13 @@ pub mod SignalRound {
         /// "impostor kills, seer checks", so the seer is drawn from the same
         /// committed seed as the impostors rather than picked by the host.
         seer_count: u32,
+        /// Tasks dealt to each player. 0 disables the task win entirely.
+        ///
+        /// The contract could previously not see a task at all, which left the
+        /// crew with exactly one way to win — vote out every impostor. Among Us
+        /// gives them a second, and it is the one that rewards playing rather
+        /// than arguing.
+        tasks_per_player: u32,
         // -- lobby --
         player_count: u32,
         seats: Map<u32, ContractAddress>, // seat -> lobby-join wallet
@@ -220,6 +227,7 @@ pub mod SignalRound {
         impostor: u32, // first hidden seat + 1, revealed at resolve
         hidden: Map<u32, bool>, // seat -> on the hidden team, filled at resolve
         seer: Map<u32, bool>, // seat -> is the seer, filled at resolve
+        tasks_done: Map<u32, u32>, // seat -> tasks this seat has submitted
         crew_won: bool,
     }
 
@@ -316,6 +324,7 @@ pub mod SignalRound {
         max_players: u32,
         hidden_count: u32,
         seer_count: u32,
+        tasks_per_player: u32,
         night_duration: u64,
         vote_duration: u64,
     ) {
@@ -337,6 +346,7 @@ pub mod SignalRound {
         self.max_players.write(max_players);
         self.hidden_count.write(hidden_count);
         self.seer_count.write(seer_count);
+        self.tasks_per_player.write(tasks_per_player);
         self.night_duration.write(night_duration);
         self.vote_duration.write(vote_duration);
     }
@@ -497,6 +507,29 @@ pub mod SignalRound {
             self.night_victim_of.write(self.round_number.read(), seat + 1);
             self.open_vote();
             self.emit(BodyReported { victim_seat: seat, vote_deadline: self.vote_deadline.read() });
+        }
+
+        /// Submit one completed task, signed by the caller's SESSION KEY.
+        ///
+        /// Be honest about what this does and does not prove. The contract
+        /// cannot verify a minigame — it has no idea whether the wires were
+        /// actually joined. What it *does* enforce is the part that matters for
+        /// an honest tally: no seat may claim more than its own allotment, and
+        /// at `resolve_round` only seats the derived roles say are crew are
+        /// counted. So an impostor spamming this achieves nothing (their
+        /// submissions are discarded once the roles open), and no single player
+        /// can carry the bar alone.
+        ///
+        /// A crewmate could still claim a task they did not do. That only helps
+        /// their own side win, so it is a game-design tradeoff rather than a
+        /// safety hole — and it is the same tradeoff any off-chain minigame has.
+        fn submit_task(ref self: ContractState) {
+            assert(self.phase.read() == phases::NIGHT, 'not night');
+            let seat = self.seat_of_session_key(get_caller_address());
+            let cap = self.tasks_per_player.read();
+            let done = self.tasks_done.read(seat);
+            assert(done < cap, 'task list already done');
+            self.tasks_done.write(seat, done + 1);
         }
 
         /// Any living player may call one emergency meeting per round, signed
@@ -722,6 +755,28 @@ pub mod SignalRound {
                 seat += 1;
             }
 
+            // The crew's own objective. Counted only over seats the freshly
+            // opened roles say are crew, which is what makes an impostor's
+            // submissions worthless and the tally trustworthy. Ghosts count:
+            // a dead crewmate's finished tasks still filled the bar, exactly as
+            // they do in Among Us.
+            let per_player = self.tasks_per_player.read();
+            let mut crew_tasks: u32 = 0;
+            let mut crew_seats: u32 = 0;
+            let mut t: u32 = 0;
+            while t != n {
+                if !self.hidden.read(t) {
+                    crew_tasks += self.tasks_done.read(t);
+                    crew_seats += 1;
+                }
+                t += 1;
+            }
+            let target = crew_seats * per_player;
+            // `target == 0` means tasks are switched off; without this guard a
+            // zero target would be trivially met and the crew would win on
+            // round 0.
+            let tasks_won = target != 0 && crew_tasks >= target;
+
             let impostors_won = impostors_alive >= crew_alive;
 
             // The round cap is itself a terminal condition.
@@ -737,12 +792,17 @@ pub mod SignalRound {
             // Surviving to the cap is a crew win: the impostors had every round
             // the game allows and failed to take the ship.
             let capped = round + 1 >= super::MAX_ROUNDS;
-            assert(impostors_alive == 0 || impostors_won || capped, 'game not over');
+            assert(
+                impostors_alive == 0 || impostors_won || tasks_won || capped, 'game not over',
+            );
 
             // Equivalent to `impostors_alive == 0` in the two original cases —
             // the assert above rules out anything else — and it is what decides
             // a capped round.
-            let crew_won = !impostors_won;
+            // Finishing every task takes precedence over parity: the crew
+            // completed the objective the game sets them, and an impostor who
+            // let that happen has lost regardless of the head count.
+            let crew_won = tasks_won || !impostors_won;
 
             self.ejected.write(ejected);
             self.impostor.write(*hidden_seats.at(0) + 1);
@@ -852,6 +912,14 @@ pub mod SignalRound {
 
         fn seer_count(self: @ContractState) -> u32 {
             self.seer_count.read()
+        }
+
+        fn tasks_per_player(self: @ContractState) -> u32 {
+            self.tasks_per_player.read()
+        }
+
+        fn tasks_done_by(self: @ContractState, seat: u32) -> u32 {
+            self.tasks_done.read(seat)
         }
 
         /// Only meaningful once resolved; false before then.
@@ -1030,6 +1098,9 @@ pub trait ISignalRoundGame<T> {
     fn assign_roles(ref self: T, role_commitment: felt252);
     fn start_night(ref self: T);
     fn report_night_kill(ref self: T);
+    fn submit_task(ref self: T);
+    fn tasks_per_player(self: @T) -> u32;
+    fn tasks_done_by(self: @T, seat: u32) -> u32;
     fn skip_night(ref self: T);
     fn call_meeting(ref self: T);
     fn end_vote(ref self: T);

@@ -285,13 +285,33 @@ mod tests {
     /// round once `round + 1 == MAX_ROUNDS`, so if this did not also accept
     /// that point as terminal there would be no legal move left at all.
     fn game_over_at(impostors_alive: u32, crew_alive: u32, round: u32) -> bool {
+        over(impostors_alive, crew_alive, round, 0, 0)
+    }
+
+    /// The whole rule, including the crew's task win.
+    fn over(
+        impostors_alive: u32, crew_alive: u32, round: u32, crew_tasks: u32, target: u32,
+    ) -> bool {
         impostors_alive == 0
             || impostors_alive >= crew_alive
+            || tasks_won(crew_tasks, target)
             || round + 1 >= signal::round::MAX_ROUNDS
     }
 
+    /// `target == 0` means tasks are switched off. Without that guard a zero
+    /// target is trivially met and the crew win on round 0 for doing nothing.
+    fn tasks_won(crew_tasks: u32, target: u32) -> bool {
+        target != 0 && crew_tasks >= target
+    }
+
     fn crew_won(impostors_alive: u32, crew_alive: u32) -> bool {
-        !(impostors_alive >= crew_alive)
+        crew_won_with(impostors_alive, crew_alive, 0, 0)
+    }
+
+    fn crew_won_with(
+        impostors_alive: u32, crew_alive: u32, crew_tasks: u32, target: u32,
+    ) -> bool {
+        tasks_won(crew_tasks, target) || !(impostors_alive >= crew_alive)
     }
 
     #[test]
@@ -374,6 +394,45 @@ mod tests {
             assert(!game_over_at(1, 4, r), 'early finish allowed');
             r += 1;
         }
+    }
+
+    // ── the crew's second win condition ───────────────────────────────────
+
+    /// Among Us gives the crew a way to win by playing rather than arguing.
+    /// Before this the only crew win was voting out every impostor.
+    #[test]
+    fn finishing_every_task_wins_it_for_the_crew() {
+        // 4 crew x 3 tasks, one impostor still alive and hidden among them.
+        assert(!over(1, 4, 0, 11, 12), 'not over at 11 of 12');
+        assert(over(1, 4, 0, 12, 12), 'the last task ends it');
+        assert(crew_won_with(1, 4, 12, 12), 'crew should win');
+    }
+
+    /// Finishing the list beats parity. The crew completed the objective the
+    /// game sets them; an impostor who allowed that has lost on the count.
+    #[test]
+    fn the_task_win_beats_impostor_parity() {
+        assert(over(1, 1, 0, 3, 3), 'should be over');
+        assert(crew_won_with(1, 1, 3, 3), 'tasks should outrank parity');
+        // ...and without the tasks, parity still wins it for them.
+        assert(!crew_won_with(1, 1, 0, 3), 'parity wins with no tasks');
+    }
+
+    /// Tasks off must not hand the crew an instant win.
+    #[test]
+    fn a_zero_task_target_never_wins() {
+        assert(!tasks_won(0, 0), 'zero target must not win');
+        assert(!over(1, 4, 0, 0, 0), 'tasks off must keep playing');
+    }
+
+    /// Only crew submissions are counted, which is what makes an impostor
+    /// calling `submit_task` pointless. Modelled here as the target being the
+    /// crew's allotment: their own tasks alone must be able to reach it.
+    #[test]
+    fn impostor_submissions_cannot_fill_the_bar() {
+        // 4 crew x 3 = 12 is the target; the crew have managed 9.
+        // An impostor adding three of their own must not tip it over.
+        assert(!over(1, 4, 0, 9, 12), 'impostor tasks must not count');
     }
 
     #[test]

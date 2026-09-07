@@ -149,6 +149,23 @@ export type GameState = {
    * `confirmEjects` is on and somebody was actually ejected.
    */
   ejectedWasImpostor: Record<number, boolean>;
+  /**
+   * seat -> tasks that seat has submitted. Mirrors `tasks_done` on-chain.
+   *
+   * Public by design: the contract counts these to decide the crew's own win
+   * condition, and it can only tell crew from impostor once the roles open at
+   * resolve — so it accepts submissions from anyone and discards the
+   * impostors' at the end.
+   *
+   * Worth being clear about the cost. Among Us shows only the aggregate bar;
+   * this is per seat, and on-chain storage is public, so a player who submits
+   * nothing is visible as such. An impostor is dealt a full fake list and can
+   * submit against it at the same rate, so keeping pace is free — the tell only
+   * catches one who does not bother, which is the same read as "he was not
+   * doing tasks" at a real table. Hiding it in the UI would be a lie about what
+   * the chain shows.
+   */
+  tasksDone: Record<number, number>;
   /** `seat + 1`; 0 = nobody died this round. */
   nightVictim: number;
   /**

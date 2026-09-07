@@ -114,9 +114,17 @@ export type RoundOpts = {
   confirmEjects?: boolean;
 };
 
-/** Living non-impostors — the seats the shared crew bar counts. */
+/**
+ * Every non-impostor seat — the seats the shared crew bar counts.
+ *
+ * Ghosts included, deliberately. A dead crewmate's finished tasks still filled
+ * the bar, and they can go on filling it, which is the whole reason ghosts keep
+ * a task list. Dropping them would also put the bar out of step with the
+ * contract, whose task-win target is computed over every crew seat: the bar
+ * could read full while `resolve_round` still answered "game not over".
+ */
 function crewSeatsOf(game: GameState): number[] {
-  return game.seats.filter((x) => !x.dead && x.role !== "IMPOSTOR").map((x) => x.seat);
+  return game.seats.filter((x) => x.role !== "IMPOSTOR").map((x) => x.seat);
 }
 
 const HOST = "0xhost";
@@ -284,6 +292,9 @@ export const useGame = create<Store>((set, get) => ({
       void get().send({ type: "task", taskId });
       return;
     }
+    // The on-chain half first, so a rejected submission (list already done)
+    // surfaces the same way it would over the relay.
+    apply(set, (g) => engine.submitTask(g, engine.seatOf(g, seat).sessionKey));
     set((st) => {
       if (!st.ship || !st.game) return {};
       const me = st.game.seats.find((x) => x.seat === seat);

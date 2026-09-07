@@ -497,6 +497,11 @@ export function VotePanel({ game }: { game: GameState }) {
   const toVote = living.filter((x) => !x.hasVoted);
   // No further round can be opened past this point — see `MAX_ROUNDS`.
   const atRoundCap = game.roundNumber + 1 >= MAX_ROUNDS;
+  // The crew's other win. Nobody would know they had won it without being told:
+  // the bar fills and then nothing visibly happens until the host resolves.
+  const tasksDone =
+    ship !== null && ship.crewProgress.total > 0 &&
+    ship.crewProgress.done >= ship.crewProgress.total;
   const rawViewer = viewerSeat === null ? null : game.seats.find((x) => x.seat === viewerSeat);
   // Same reason as the role card: on a screen pinned to one player, having
   // voted (or being dead) is what returns you to the tally, since the viewer
@@ -644,7 +649,9 @@ export function VotePanel({ game }: { game: GameState }) {
             ? // The host actions assert `ballot_closed()`, so they stay disabled
               // rather than firing a call that can only revert.
               `${toVote.length} still to vote — or wait out the clock`
-            : atRoundCap
+            : tasksDone
+              ? "Every crew task is done — open the commitment and the contract will count them as a crew win."
+              : atRoundCap
               ? // Reaching the cap is itself terminal: the impostors had every
                 // round the game allows. Resolve is the only move left, and it
                 // is now a legal one.

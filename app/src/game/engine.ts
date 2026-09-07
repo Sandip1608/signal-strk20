@@ -92,6 +92,7 @@ export function createGame(opts: {
     roundNumber: 0,
     ejections: {},
     ejectedWasImpostor: {},
+    tasksDone: {},
     nightVictim: NO_SEAT,
     pendingVictim: NO_SEAT,
     tallies: {},
@@ -254,6 +255,23 @@ export function privateKill(state: GameState, victimSeat: number): GameState {
       private: true,
     },
   );
+}
+
+/**
+ * `submit_task()` — one completed task, signed by the caller's SESSION KEY.
+ *
+ * The contract cannot verify a minigame. What it enforces is the part that
+ * makes the tally honest: no seat may claim more than its own allotment, and
+ * only crew submissions are counted once the roles open. An impostor calling
+ * this achieves nothing, which is why it does not need to know who is who.
+ */
+export function submitTask(state: GameState, sessionKey: string): GameState {
+  require_(state.phase === Phase.NIGHT, "not night");
+  const who = state.seats.find((s) => s.sessionKey === sessionKey);
+  require_(who !== undefined, "not a session key");
+  const done = state.tasksDone[who.seat] ?? 0;
+  require_(done < state.tasksPerPlayer, "task list already done");
+  return { ...state, tasksDone: { ...state.tasksDone, [who.seat]: done + 1 } };
 }
 
 /**
@@ -561,6 +579,21 @@ export function resolveRound(
     if (hidden.has(x.seat)) impostorsAlive += 1;
     else crewAlive += 1;
   }
+  // The crew's own objective, counted only over the seats the opened roles
+  // say are crew. Ghosts count — a dead crewmate's finished tasks still filled
+  // the bar, exactly as in Among Us.
+  let crewTasks = 0;
+  let crewSeats = 0;
+  for (const x of afterSeats) {
+    if (hidden.has(x.seat)) continue;
+    crewTasks += state.tasksDone[x.seat] ?? 0;
+    crewSeats += 1;
+  }
+  const target = crewSeats * state.tasksPerPlayer;
+  // A zero target means tasks are off; without this the crew would win on
+  // round 0 for doing nothing.
+  const tasksWon = target !== 0 && crewTasks >= target;
+
   const impostorsWon = impostorsAlive >= crewAlive;
 
   // The round cap is itself a terminal condition — see the long note in
@@ -570,11 +603,14 @@ export function resolveRound(
   // legal move left and the stakes stayed locked. Surviving to the cap is a
   // crew win.
   const capped = state.roundNumber + 1 >= MAX_ROUNDS;
-  require_(impostorsAlive === 0 || impostorsWon || capped, "game not over");
+  require_(impostorsAlive === 0 || impostorsWon || tasksWon || capped, "game not over");
 
   // Equivalent to `impostorsAlive === 0` in the two original cases, since the
   // guard above rules out anything else, and it is what decides a capped round.
-  const crewWon = !impostorsWon;
+  // Finishing every task takes precedence over parity: the crew completed the
+  // objective the game sets them, and an impostor who let that happen has lost
+  // regardless of the head count.
+  const crewWon = tasksWon || !impostorsWon;
 
   return log(
     {
