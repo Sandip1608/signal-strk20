@@ -54,6 +54,8 @@ A1priv/A1priv.ts
 
 # Deploy credentials — never commit
 .env.deploy
+# Test-player burner keys (scripts/players.mjs) — never commit
+.players.json
 
 .cursor/
 .claude/
