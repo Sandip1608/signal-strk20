@@ -667,7 +667,7 @@ export function tickBots(room: Room): void {
       ? room.ship
         ? nextNightAction(room.game, room.ship)
         : null
-      : nextBotAction(room.game);
+      : nextBotAction(room.game, room.ship);
   if (!action) return;
 
   room.lastBotAt = now;

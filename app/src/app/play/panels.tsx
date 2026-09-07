@@ -19,10 +19,15 @@ import { MAX_ROUNDS, displaySeat, type GameState } from "@/game/types";
 import {
   MAX_IMPOSTORS,
   MAX_TASKS,
+  MAX_TIMER_SECS,
   MIN_IMPOSTORS,
   MIN_TASKS,
+  MIN_TIMER_SECS,
   PACES,
   PLAYER_CEILING,
+  TIMER_STEP_SECS,
+  VOTE_PRESETS,
+  formatSecs,
   impostorLabel,
   minPlayersFor,
   normalise,
@@ -203,6 +208,25 @@ function HostSettings({
           max={MAX_TASKS}
           onChange={(n) => apply({ tasksPerPlayer: n })}
         />
+        <Stepper
+          label="Night"
+          value={settings.nightSecs}
+          min={MIN_TIMER_SECS}
+          max={MAX_TIMER_SECS}
+          step={TIMER_STEP_SECS}
+          onChange={(n) => apply({ nightSecs: n })}
+          format={formatSecs}
+        />
+        <Stepper
+          label="Vote"
+          value={settings.voteSecs}
+          min={MIN_TIMER_SECS}
+          max={MAX_TIMER_SECS}
+          step={TIMER_STEP_SECS}
+          onChange={(n) => apply({ voteSecs: n })}
+          format={formatSecs}
+          hint="how long the ballot stays open"
+        />
         <div className={s.setting}>
           <span className={s.settingLabel}>
             Seer
@@ -243,6 +267,18 @@ function HostSettings({
         </div>
       </div>
       <div className={s.btnRow} style={{ marginTop: 10 }}>
+        {VOTE_PRESETS.map((v) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => apply({ voteSecs: v })}
+            className={`${s.btn} ${settings.voteSecs === v ? "" : s.btnGhost}`}
+          >
+            {formatSecs(v)} vote
+          </button>
+        ))}
+      </div>
+      <div className={s.btnRow} style={{ marginTop: 10 }}>
         {PACES.map((o) => (
           <button
             key={o.key}
@@ -252,7 +288,7 @@ function HostSettings({
               settings.nightSecs === o.night && settings.voteSecs === o.vote ? "" : s.btnGhost
             }`}
           >
-            {o.label} · {o.night >= 120 ? `${Math.round(o.night / 60)}m` : `${o.night}s`} night
+            {o.label} · {formatSecs(o.night)} night / {formatSecs(o.vote)} vote
           </button>
         ))}
       </div>
@@ -266,14 +302,18 @@ function Stepper({
   value,
   min,
   max,
+  step = 1,
   onChange,
+  format,
 }: {
   label: string;
   hint?: string;
   value: number;
   min: number;
   max: number;
+  step?: number;
   onChange: (n: number) => void;
+  format?: (n: number) => string;
 }) {
   return (
     <div className={s.setting}>
@@ -285,17 +325,17 @@ function Stepper({
         <button
           type="button"
           className={s.stepBtn}
-          onClick={() => onChange(value - 1)}
+          onClick={() => onChange(Math.max(min, value - step))}
           disabled={value <= min}
           aria-label={`Fewer ${label}`}
         >
           −
         </button>
-        <span className={s.stepValue}>{value}</span>
+        <span className={s.stepValue}>{format ? format(value) : value}</span>
         <button
           type="button"
           className={s.stepBtn}
-          onClick={() => onChange(value + 1)}
+          onClick={() => onChange(Math.min(max, value + step))}
           disabled={value >= max}
           aria-label={`More ${label}`}
         >

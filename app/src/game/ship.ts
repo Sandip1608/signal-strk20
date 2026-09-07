@@ -754,7 +754,7 @@ export function botDestination(ship: ShipState, seat: number): RoomId | null {
   if (options.length === 0) return null;
 
   // Head for the room holding an outstanding task, one step at a time.
-  const target = open[0]?.room;
+  const target = open.length > 0 ? open[seat % open.length]!.room : undefined;
   if (target && target !== here) {
     const step = options.find((o) => o === target);
     if (step) return step;
