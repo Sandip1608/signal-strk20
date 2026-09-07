@@ -861,8 +861,9 @@ pub mod SignalRound {
             // the game allows and failed to take the ship.
             let capped = round + 1 >= super::MAX_ROUNDS;
             if phase == phases::NIGHT {
-                // Night may only resolve here if the crew finished their jobs.
-                assert(tasks_won, 'game not over');
+                // Night may end here on a real win: jobs done, or a kill left
+                // the impostors at parity. Anything else would skip the vote.
+                assert(tasks_won || impostors_won, 'game not over');
             } else {
                 assert(
                     impostors_alive == 0 || impostors_won || tasks_won || capped, 'game not over',

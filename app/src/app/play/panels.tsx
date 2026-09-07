@@ -21,6 +21,10 @@ import {
   MAX_TASKS,
   MAX_TIMER_SECS,
   MIN_IMPOSTORS,
+  MIN_KILL_COOLDOWN_SECS,
+  MAX_KILL_COOLDOWN_SECS,
+  KILL_COOLDOWN_STEP_SECS,
+  KILL_COOLDOWN_PRESETS,
   MIN_TASKS,
   MIN_TIMER_SECS,
   PACES,
@@ -182,8 +186,8 @@ function HostSettings({
         Round settings
       </h3>
       <p className={s.panelHint}>
-        Only you can change these while the lobby is open. Impostors, table size and timers are
-        constructor arguments; tasks and Confirm Ejects are client-side.
+        Only you can change these while the lobby is open. Impostors, table size and night/vote
+        timers are constructor arguments; tasks, kill cooldown and Confirm Ejects are client-side.
       </p>
       <div className={s.settings}>
         <Stepper
@@ -226,6 +230,16 @@ function HostSettings({
           onChange={(n) => apply({ voteSecs: n })}
           format={formatSecs}
           hint="how long the ballot stays open"
+        />
+        <Stepper
+          label="Kill cooldown"
+          value={settings.killCooldownSecs}
+          min={MIN_KILL_COOLDOWN_SECS}
+          max={MAX_KILL_COOLDOWN_SECS}
+          step={KILL_COOLDOWN_STEP_SECS}
+          onChange={(n) => apply({ killCooldownSecs: n })}
+          format={formatSecs}
+          hint="impostors wait this long before the first kill, and between kills"
         />
         <div className={s.setting}>
           <span className={s.settingLabel}>
@@ -275,6 +289,18 @@ function HostSettings({
             className={`${s.btn} ${settings.voteSecs === v ? "" : s.btnGhost}`}
           >
             {formatSecs(v)} vote
+          </button>
+        ))}
+      </div>
+      <div className={s.btnRow} style={{ marginTop: 10 }}>
+        {KILL_COOLDOWN_PRESETS.map((v) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => apply({ killCooldownSecs: v })}
+            className={`${s.btn} ${settings.killCooldownSecs === v ? "" : s.btnGhost}`}
+          >
+            {formatSecs(v)} kill
           </button>
         ))}
       </div>

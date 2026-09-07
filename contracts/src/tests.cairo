@@ -432,12 +432,20 @@ mod tests {
         assert(crew_won_with(1, 4, 12, 12), 'crew should win');
     }
 
-    /// Night may only resolve if the jobs are actually done — otherwise
-    /// anyone could skip the vote. Vote still uses the full `over` rule.
+    /// Night may resolve on a real win — jobs done, or living impostors
+    /// equal (or outnumber) living crew. Anything else would skip the vote.
+    fn night_may_resolve(
+        impostors_alive: u32, crew_alive: u32, crew_tasks: u32, target: u32,
+    ) -> bool {
+        tasks_won(crew_tasks, target) || impostors_alive >= crew_alive
+    }
+
     #[test]
-    fn night_resolve_requires_the_task_win() {
-        assert(!tasks_won(8, 12), 'night must not finish early');
-        assert(tasks_won(12, 12), 'full bar may resolve at night');
+    fn night_resolve_requires_a_terminal_win() {
+        assert(!night_may_resolve(1, 4, 8, 12), 'undecided night stays open');
+        assert(night_may_resolve(1, 4, 12, 12), 'full bar may resolve at night');
+        assert(night_may_resolve(1, 1, 0, 3), 'parity may resolve at night');
+        assert(night_may_resolve(2, 1, 0, 3), 'majority may resolve at night');
     }
 
     /// Finishing the list beats parity. The crew completed the objective the

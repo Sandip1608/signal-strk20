@@ -15,6 +15,7 @@ import { livingSeats } from "./engine";
 import {
   BOT_TASK_SECS,
   botDestination,
+  killReady,
   neighbours,
   occupants,
   sightingsFor,
@@ -291,21 +292,17 @@ export function nextNightAction(state: GameState, ship: ShipState): BotAction | 
     }
   }
 
-  // 3. A bot impostor alone with someone takes the chance — but only once the
-  //    night is a third gone.
-  //
-  //    Without this gate the impostor kills on the first beat it shares a room
-  //    with anyone, which in testing ended the night in ~20 seconds: the human
-  //    never got to walk anywhere or finish a task, and the "what you saw"
-  //    evidence at the meeting was empty. Gating on elapsed time rather than a
-  //    move count keeps it proportional to whichever pace the host picked.
+  // 3. A bot impostor alone with someone takes the chance — but not while the
+  //    host-set kill cooldown is still running. That used to be hidden by the
+  //    UI only; bots (and a handwritten POST) skipped it, so the first shared
+  //    room ended the night.
   const elapsed = nightElapsedFraction(state);
   const impostor = pick(living.filter((x) => x.isBot && x.role === "IMPOSTOR"));
-  if (impostor && elapsed > 0.28 + traits(impostor.seat).delay * 0.2) {
+  if (impostor && killReady(ship)) {
     const room = ship.positions[impostor.seat];
     const targets = occupants(ship, room, livingSeatNos).filter((x) => x !== impostor.seat);
     // Ramps up as the night runs out, so a kill still lands before the timer.
-    const urgency = 0.12 + 0.45 * Math.max(0, elapsed - 0.28);
+    const urgency = 0.18 + 0.5 * elapsed;
     if (targets.length > 0 && Math.random() < urgency) {
       return { kind: "kill", impostor: impostor.seat, victim: pick(targets)! };
     }

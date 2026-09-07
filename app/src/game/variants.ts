@@ -37,6 +37,8 @@ export type Settings = {
   nightSecs: number;
   /** Seconds the ballot stays open. */
   voteSecs: number;
+  /** Seconds an impostor must wait before (and between) kills. */
+  killCooldownSecs: number;
   /**
    * Among Us's "Confirm Ejects". When off, the ejection scene does not say
    * whether the ejected player was an impostor — a real and much harder way to
@@ -60,6 +62,10 @@ export const MAX_TIMER_SECS = 1200;
 export const TIMER_STEP_SECS = 5;
 /** Common vote lengths the host can tap rather than stepping. */
 export const VOTE_PRESETS = [15, 30, 45, 60, 90, 120] as const;
+export const MIN_KILL_COOLDOWN_SECS = 5;
+export const MAX_KILL_COOLDOWN_SECS = 60;
+export const KILL_COOLDOWN_STEP_SECS = 5;
+export const KILL_COOLDOWN_PRESETS = [10, 15, 20, 25, 30, 45] as const;
 /** `SignalRound::CEIL_PLAYERS`. */
 export const PLAYER_CEILING = 15;
 
@@ -77,6 +83,7 @@ export const DEFAULT_SETTINGS: Settings = {
   seer: false,
   nightSecs: 90,
   voteSecs: 120,
+  killCooldownSecs: 20,
   confirmEjects: true,
 };
 
@@ -94,6 +101,7 @@ export function optsFromSettings(s: Settings) {
   return {
     nightDurationSecs: n.nightSecs,
     voteDurationSecs: n.voteSecs,
+    killCooldownSecs: n.killCooldownSecs,
     minPlayers: minPlayersFor(n.impostors),
     maxPlayers: n.maxPlayers,
     hiddenCount: n.impostors,
@@ -110,6 +118,7 @@ export function settingsFromGame(g: {
   seerCount: number;
   nightDurationSecs: number;
   voteDurationSecs: number;
+  killCooldownSecs: number;
   confirmEjects: boolean;
 }): Settings {
   return normalise({
@@ -119,6 +128,7 @@ export function settingsFromGame(g: {
     seer: g.seerCount > 0,
     nightSecs: g.nightDurationSecs,
     voteSecs: g.voteDurationSecs,
+    killCooldownSecs: g.killCooldownSecs ?? 20,
     confirmEjects: g.confirmEjects,
   });
 }
@@ -154,6 +164,7 @@ export function normalise(s: Settings): Settings {
     seer: s.seer && impostors + 1 < floor,
     nightSecs: clamp(s.nightSecs, MIN_TIMER_SECS, MAX_TIMER_SECS),
     voteSecs: clamp(s.voteSecs, MIN_TIMER_SECS, MAX_TIMER_SECS),
+    killCooldownSecs: clamp(s.killCooldownSecs ?? 20, MIN_KILL_COOLDOWN_SECS, MAX_KILL_COOLDOWN_SECS),
     confirmEjects: s.confirmEjects,
   };
 }
