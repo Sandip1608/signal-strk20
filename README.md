@@ -242,4 +242,4 @@ Working notes: [`CLAUDE.md`](./CLAUDE.md)
 
 ## License
 
-[MIT](./LICENSE).
+[Apache-2.0](./LICENSE) © 2026 Sandip Bhujel.
