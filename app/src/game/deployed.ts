@@ -14,9 +14,9 @@ export type Deployment = {
 };
 
 export const DEPLOYMENT: Deployment | null = {
-  network: "sepolia",
-  rpc: "https://starknet-sepolia-rpc.publicnode.com",
-  chainId: "0x534e5f5345504f4c4941",
-  round: "0x252ecaea30b870d8ab30075ac7eb4b6e29572dbd0c0464be33396497026756d",
-  escrow: "0x7c12b8419a68a412f9397e16e23faf3219b0a547e70e141fff87a295c311ad8",
+  network: "mainnet",
+  rpc: "https://starknet-rpc.publicnode.com",
+  chainId: "0x534e5f4d41494e",
+  round: "0x13ea00a52a5dc531430b4ddc492d2c9da8c187b7a49d96c86df2771c301d9ce",
+  escrow: "0x21006bb87b736db531088782b42ad7eb9d37d1f373c438634625bbe484275cf",
 };

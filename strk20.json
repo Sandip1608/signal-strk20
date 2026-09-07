@@ -11,21 +11,26 @@
     "0xb1f0bf3c7d7bd7225e6ef4100e68e3d4a8ce58cdf93968d425062e83b208bc",
     "0x22d8dd04de757618b59d9ed40772371e205308232172241acc61c3f05b17085",
     "0x5ebaf0dd574ff47733107132a5987020b15451affe8dbcfd96413e9d34db1fc",
-    "0x7d57671de11546ea9cb67fb97b064c35340dd6c87c5ea39b13a821d81c296ac"
+    "0x7d57671de11546ea9cb67fb97b064c35340dd6c87c5ea39b13a821d81c296ac",
+    "0x642c7430424cdaa6dfff0599d6bfeb0e190adc3690a3c1f7077261125623c27",
+    "0x7902004df298b99b7f2a7e7167ef264f856c23b32565a72e182ac09dce68eb2",
+    "0x7070f2b744ec55ab0f24311929c348ae45558bc39413c15cfe38f7954bd7a25",
+    "0x1ad528eca0de0e97d513e28170bb78b627d4543b42585b76b01c066d21d8beb",
+    "0x167b7dc6ad765aea2914d32268f44a9457b81f68d7be7cdcb1b4bf4132e0a71"
   ],
   "contracts": [
     {
       "name": "SignalRound",
-      "address": "0x252ecaea30b870d8ab30075ac7eb4b6e29572dbd0c0464be33396497026756d",
+      "address": "0x13ea00a52a5dc531430b4ddc492d2c9da8c187b7a49d96c86df2771c301d9ce",
       "class_hash": "0x230b0869825a7949a8d468c0c6fd90cd4d6fa64653b0d70eabf9f937e7e976e"
     },
     {
       "name": "SignalEscrow",
-      "address": "0x7c12b8419a68a412f9397e16e23faf3219b0a547e70e141fff87a295c311ad8",
+      "address": "0x21006bb87b736db531088782b42ad7eb9d37d1f373c438634625bbe484275cf",
       "class_hash": "0x753e5400760c07bee7f64a18eb200b97d8e03f140ae7aa612d0e53b02dd1554"
     }
   ],
   "demo_video": "",
   "demo_url": "https://signal-strk20.onrender.com",
-  "network": "sepolia"
+  "network": "mainnet"
 }
