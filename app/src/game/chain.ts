@@ -14,8 +14,9 @@
  * describe.
  */
 
-import { RpcProvider, num } from "starknet";
+import { Account, RpcProvider, num } from "starknet";
 import { DEPLOYMENT } from "./deployed";
+import { SESSION_ACCOUNT_CLASS, sessionAccountAddress } from "./crypto";
 
 /** One STRK20 action, mirroring WALLET_API.STRK20_ACTION (types-js wallet-api). */
 export type Strk20Action =
@@ -122,12 +123,75 @@ export async function joinOnChain(
   if (!p.sessionKey || !p.payoutNoteId || !p.entropy) {
     throw new ChainError("seat is missing its keys — take a seat first");
   }
+  // Register the session key's *account address*, not the raw public key: that
+  // is what will call in-round actions once the browser deploys the account,
+  // and what `seat_of_session_key` matches. See `sessionAccountAddress`.
   const res = await wallet.execute({
     contractAddress: DEPLOYMENT.round,
     entrypoint: "join",
-    calldata: [p.sessionKey, p.payoutNoteId, p.entropy],
+    calldata: [sessionAccountAddress(p.sessionKey), p.payoutNoteId, p.entropy],
   });
   return res.transaction_hash;
+}
+
+/**
+ * Open the emergency meeting from the player's OWN session account — the
+ * client half of the "session keys are per-player, browser-held" claim.
+ *
+ * `call_meeting` must be signed by a seat's session key, and this signs it
+ * with the browser's burner key, from the account that key controls. No player
+ * key ever reaches a server. The steps:
+ *   1. ask the guarded faucet to gas-fund the session account (it funds only
+ *      an address that on-chain holds a seat, so it is not an open tap),
+ *   2. deploy the session account if it does not exist yet,
+ *   3. send `call_meeting` from it.
+ *
+ * `sessionPrivateKey` is the burner key held only in this browser (see the
+ * Seat type); `sessionKey` is its public key.
+ */
+export async function openMeetingFromSession(p: {
+  sessionKey: string;
+  sessionPrivateKey: string;
+}): Promise<string> {
+  if (!DEPLOYMENT) throw new ChainError("no deployment recorded");
+  const provider = new RpcProvider({ nodeUrl: DEPLOYMENT.rpc });
+  const address = sessionAccountAddress(p.sessionKey);
+
+  // 1. gas — the faucet verifies this address holds a seat before funding.
+  const res = await fetch("/api/chain/faucet", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ address }),
+  });
+  const funded = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) throw new ChainError(funded.error ?? `faucet HTTP ${res.status}`);
+
+  const acc = new Account({ provider, address, signer: p.sessionPrivateKey });
+
+  // 2. deploy the account once, funded by step 1.
+  let deployed = true;
+  try {
+    await provider.getClassHashAt(address);
+  } catch {
+    deployed = false;
+  }
+  if (!deployed) {
+    const dep = await acc.deployAccount({
+      classHash: SESSION_ACCOUNT_CLASS,
+      constructorCalldata: [p.sessionKey],
+      addressSalt: p.sessionKey,
+    });
+    await provider.waitForTransaction(dep.transaction_hash);
+  }
+
+  // 3. call the meeting — the moment the on-chain ballot opens.
+  const tx = await acc.execute({
+    contractAddress: DEPLOYMENT.round,
+    entrypoint: "call_meeting",
+    calldata: [],
+  });
+  await provider.waitForTransaction(tx.transaction_hash);
+  return tx.transaction_hash;
 }
 
 /** STRK — same address on mainnet and Sepolia. */

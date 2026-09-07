@@ -39,7 +39,8 @@ import {
   settingsFromGame,
   type Settings,
 } from "@/game/variants";
-import { canVoteThroughPool, explorerTx, voteThroughPool } from "@/game/chain";
+import { canVoteThroughPool, explorerTx, openMeetingFromSession, voteThroughPool } from "@/game/chain";
+import { DEPLOYMENT } from "@/game/deployed";
 import { useWallet } from "@/game/useWallet";
 import { PublicLedger, RoleDossier } from "./stitch/role";
 import { EmergencyReport, ImpostorRadar, NightCrewBlind, NightPlayFrame } from "./stitch/night";
@@ -701,6 +702,24 @@ export function VotePanel({ game }: { game: GameState }) {
         onPoolCast={
           canVoteThroughPool(wallet)
             ? (candidate) => voteThroughPool(wallet!, candidate)
+            : undefined
+        }
+        // Open the on-chain ballot without any server-held player key: the host
+        // route advances to night, then this browser's own session account
+        // (the one it registered at join) signs the meeting.
+        onOpenBallot={
+          DEPLOYMENT && canVoteThroughPool(wallet)
+            ? async (onStep) => {
+                onStep("Host is starting the round…");
+                const r = await fetch("/api/chain/advance", { method: "POST" });
+                const j = (await r.json()) as { error?: string };
+                if (!r.ok) throw new Error(j.error ?? `advance HTTP ${r.status}`);
+                onStep("Your session account is calling the meeting…");
+                return openMeetingFromSession({
+                  sessionKey: viewer.sessionKey,
+                  sessionPrivateKey: viewer.sessionPrivateKey,
+                });
+              }
             : undefined
         }
         poolExplorer={explorerTx}

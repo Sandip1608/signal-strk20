@@ -31,6 +31,31 @@ export function generateSessionKey(): { privateKey: string; publicKey: string } 
 }
 
 /**
+ * OpenZeppelin account v0.8.1 class, declared on both Sepolia and mainnet.
+ * `scripts/players.mjs` uses the same class, so a browser-deployed session
+ * account and a script-deployed one are the same kind of contract.
+ */
+export const SESSION_ACCOUNT_CLASS =
+  "0x061dac032f228abef9c6626f995015233097ae253a7f72d68552db02f2971b8f";
+
+/**
+ * The address the session key's account contract will live at once deployed.
+ *
+ * On Starknet a bare keypair cannot send a transaction — only a deployed
+ * account can. So the value `join` registers as the seat's session key is this
+ * *account address*, not the raw public key: it is what `get_caller_address()`
+ * returns when the browser later signs `call_meeting` / `submit_task` from the
+ * deployed account, which is exactly what `seat_of_session_key` matches. The
+ * address is deterministic in the public key (salt = key, constructor = [key],
+ * deployer 0), so it is known before the account exists.
+ */
+export function sessionAccountAddress(publicKey: string): string {
+  return num.toHex(
+    hash.calculateContractAddressFromHash(publicKey, SESSION_ACCOUNT_CLASS, [publicKey], 0),
+  );
+}
+
+/**
  * `poseidon_hash_span([...hidden_seats, salt])`.
  *
  * The host posts this in `assign_roles` and opens it in `resolve_round`; the

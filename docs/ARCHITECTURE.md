@@ -109,7 +109,16 @@ everything identifying is shielded.
   machine edges and demo time; the RFP's novel claims (fair roles,
   anonymous votes, shielded payout) are all demonstrated in one cycle.
 - **Burner EOAs, not session-key account abstraction.** A locally-held
-  burner keypair already makes the unlinkability claim true.
+  burner keypair already makes the unlinkability claim true. Since a bare
+  keypair cannot *send* a Starknet transaction, `join` registers the burner's
+  deterministic **account address** (OZ v0.8.1 class) as the seat's session
+  key, and the browser deploys that account and signs its own in-round actions
+  (e.g. `call_meeting`) from it. Gas is the one thing the player cannot self-
+  provide before their account exists, so a guarded server faucet
+  (`/api/chain/faucet`) tops up an address *only* after confirming it holds a
+  seat on-chain — the server pays gas, but **never holds or signs with a player
+  key**. A full paymaster would remove even that faucet; it is the documented
+  Phase-2 item.
 - **No task minigames, no Secret Hitler/Avalon variants, no paymaster.**
   Phase 2, only if the Day 2 checklist is done with time to spare.
 - **Vote amounts are plaintext-after-fill by design** (open-note pattern,

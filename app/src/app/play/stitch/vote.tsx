@@ -24,6 +24,7 @@ export function VoteTable({
   onPickSeat,
   onCast,
   onPoolCast,
+  onOpenBallot,
   poolExplorer,
   host,
 }: {
@@ -34,6 +35,8 @@ export function VoteTable({
   onCast?: (candidate: number) => void;
   /** Send the vote as a real STRK20 pool leg. Present only when a privacy wallet is connected. */
   onPoolCast?: (candidate: number) => Promise<string>;
+  /** Open the on-chain ballot: host advances to night, the player's session account calls the meeting. */
+  onOpenBallot?: (onStep: (note: string) => void) => Promise<string>;
   poolExplorer?: (tx: string) => string;
   host?: ReactNode;
 }) {
@@ -49,8 +52,8 @@ export function VoteTable({
   >({ state: "idle" });
   const [ballot, setBallot] = useState<
     | { state: "idle" }
-    | { state: "opening" }
-    | { state: "open"; deadline: number }
+    | { state: "opening"; note: string }
+    | { state: "open"; tx: string }
     | { state: "error"; message: string }
   >({ state: "idle" });
   const max = living.reduce((m, x) => {
@@ -234,24 +237,19 @@ export function VoteTable({
                   Pool leg failed: {pool.message}
                 </p>
               )}
-              {onPoolCast && (
+              {onOpenBallot && (
                 <div style={{ marginTop: 10 }}>
                   <button
                     type="button"
                     className={`${s.btn} ${s.btnGhost}`}
                     disabled={ballot.state === "opening"}
                     onClick={async () => {
-                      setBallot({ state: "opening" });
+                      setBallot({ state: "opening", note: "Host is starting the round…" });
                       try {
-                        const r = await fetch("/api/chain/advance", { method: "POST" });
-                        const j = (await r.json()) as {
-                          voteDeadline?: number;
-                          error?: string;
-                        };
-                        if (!r.ok || !j.voteDeadline) {
-                          throw new Error(j.error ?? `HTTP ${r.status}`);
-                        }
-                        setBallot({ state: "open", deadline: j.voteDeadline });
+                        const tx = await onOpenBallot((note) =>
+                          setBallot({ state: "opening", note }),
+                        );
+                        setBallot({ state: "open", tx });
                       } catch (e) {
                         setBallot({
                           state: "error",
@@ -261,14 +259,21 @@ export function VoteTable({
                     }}
                   >
                     {ballot.state === "opening"
-                      ? "Opening on-chain ballot…"
-                      : "Open on-chain ballot (host)"}
+                      ? ballot.note
+                      : "Open on-chain ballot (your session key)"}
                   </button>
                   {ballot.state === "open" && (
                     <p className={st.hint} style={{ color: "#10b981", marginTop: 6 }}>
-                      On-chain ballot open until{" "}
-                      {new Date(ballot.deadline * 1000).toLocaleTimeString()} — send the pool
-                      vote before it closes.
+                      On-chain ballot open —{" "}
+                      {poolExplorer ? (
+                        <a href={poolExplorer(ballot.tx)} target="_blank" rel="noreferrer">
+                          {short(ballot.tx)}
+                        </a>
+                      ) : (
+                        short(ballot.tx)
+                      )}
+                      . Your session account called the meeting — send the pool vote before the
+                      240s clock runs out.
                     </p>
                   )}
                   {ballot.state === "error" && (

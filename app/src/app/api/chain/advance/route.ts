@@ -5,74 +5,46 @@ import { Account, RpcProvider } from "starknet";
 import { DEPLOYMENT } from "@/game/deployed";
 
 /**
- * POST /api/chain/advance — walk the DEPLOYED round to an open ballot, so the
- * pool vote leg has somewhere to land. The server-side twin of
- * `scripts/advance.mjs --open`, so a demo run from the website needs no
- * terminal: LOBBY → assign_roles → start_night → call_meeting → VOTE.
+ * POST /api/chain/advance — perform the HOST's duties on the deployed round:
+ * `assign_roles` and `start_night`, taking it LOBBY → ASSIGNED → NIGHT.
  *
- * Signing keys come from the environment (on Render: dashboard env vars;
- * locally they fall back to .env.deploy / .players.json, the same files the
- * scripts use). They are read server-side only — nothing here reaches the
- * client bundle:
+ * It deliberately stops at NIGHT and does NOT open the meeting. Opening the
+ * ballot (`call_meeting`) is a *player* action and must be signed by a seat's
+ * session key — the browser does that itself from the player's own session
+ * account (see `openMeetingFromSession`), so no player key is ever held
+ * server-side. The host key is legitimately the game host's, so it stays here.
+ *
+ * Host key comes from the environment (on Render: dashboard env vars; locally
+ * it falls back to .env.deploy). Read server-side only — never in the client
+ * bundle:
  *   STARKNET_ACCOUNT_ADDRESS / STARKNET_PRIVATE_KEY   the host
- *   SESSION5_ADDRESS / SESSION5_PRIVATE_KEY           a seated session account
- *                                                     (call_meeting must be
- *                                                     signed by a session key)
  *   ADVANCE_KEY                                       optional shared secret;
  *                                                     when set, the request
  *                                                     body must carry it
  *
- * Costs the host a little testnet gas per call and burns the session seat's
- * one emergency meeting, so it does nothing when the round is already past
- * NIGHT — re-posting while a ballot is open just reports the deadline.
+ * Idempotent: does nothing once the round is past NIGHT.
  */
 
 export const dynamic = "force-dynamic";
 
 const PHASES = ["LOBBY", "ASSIGNED", "NIGHT", "VOTE", "RESOLVED"] as const;
 
-function envOrFile(): {
-  host?: { address: string; pk: string };
-  session?: { address: string; pk: string };
-} {
-  const out: ReturnType<typeof envOrFile> = {};
-  let hostAddr = process.env.STARKNET_ACCOUNT_ADDRESS;
-  let hostPk = process.env.STARKNET_PRIVATE_KEY;
-  if (!hostAddr || !hostPk) {
+function hostKeys(): { address: string; pk: string } | null {
+  let address = process.env.STARKNET_ACCOUNT_ADDRESS;
+  let pk = process.env.STARKNET_PRIVATE_KEY;
+  if (!address || !pk) {
     // Local dev convenience: the same file deploy.mjs reads.
     const p = resolve(process.cwd(), ".env.deploy");
     if (existsSync(p)) {
       for (const line of readFileSync(p, "utf8").split("\n")) {
         const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
         if (!m) continue;
-        if (m[1] === "STARKNET_ACCOUNT_ADDRESS") hostAddr = hostAddr || m[2];
-        if (m[1] === "STARKNET_PRIVATE_KEY") hostPk = hostPk || m[2];
+        if (m[1] === "STARKNET_ACCOUNT_ADDRESS") address = address || m[2];
+        if (m[1] === "STARKNET_PRIVATE_KEY") pk = pk || m[2];
       }
     }
   }
-  if (hostAddr && hostPk) out.host = { address: hostAddr, pk: hostPk };
-
-  let sessAddr = process.env.SESSION5_ADDRESS;
-  let sessPk = process.env.SESSION5_PRIVATE_KEY;
-  if (!sessAddr || !sessPk) {
-    const p = resolve(process.cwd(), ".players.json");
-    if (existsSync(p)) {
-      try {
-        const players = JSON.parse(readFileSync(p, "utf8")) as {
-          sessionAccount?: { address: string; privateKey: string };
-        }[];
-        const withSession = players.find((x) => x.sessionAccount);
-        if (withSession?.sessionAccount) {
-          sessAddr = sessAddr || withSession.sessionAccount.address;
-          sessPk = sessPk || withSession.sessionAccount.privateKey;
-        }
-      } catch {
-        // fall through to the "missing keys" error below
-      }
-    }
-  }
-  if (sessAddr && sessPk) out.session = { address: sessAddr, pk: sessPk };
-  return out;
+  return address && pk ? { address, pk } : null;
 }
 
 export async function POST(req: Request) {
@@ -84,14 +56,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "bad advance key" }, { status: 403 });
   }
 
-  const keys = envOrFile();
-  if (!keys.host || !keys.session) {
+  const host = hostKeys();
+  if (!host) {
     return NextResponse.json(
-      {
-        error:
-          "missing signer env vars — set STARKNET_ACCOUNT_ADDRESS, " +
-          "STARKNET_PRIVATE_KEY, SESSION5_ADDRESS, SESSION5_PRIVATE_KEY",
-      },
+      { error: "missing host env vars — set STARKNET_ACCOUNT_ADDRESS and STARKNET_PRIVATE_KEY" },
       { status: 503 },
     );
   }
@@ -102,8 +70,8 @@ export async function POST(req: Request) {
     Number((await provider.callContract({ contractAddress: round, entrypoint, calldata: [] }))[0]);
 
   const txs: string[] = [];
-  const step = async (who: { address: string; pk: string }, entrypoint: string, calldata: string[] = []) => {
-    const acc = new Account({ provider, address: who.address, signer: who.pk });
+  const step = async (entrypoint: string, calldata: string[] = []) => {
+    const acc = new Account({ provider, address: host.address, signer: host.pk });
     const tx = await acc.execute({ contractAddress: round, entrypoint, calldata });
     await provider.waitForTransaction(tx.transaction_hash);
     txs.push(tx.transaction_hash);
@@ -115,25 +83,15 @@ export async function POST(req: Request) {
       // A rehearsal commitment: nonzero so the contract accepts it. This route
       // exists to open ballots for vote-leg testing, not to run honest rounds —
       // the real role draw stays with the game client.
-      await step(keys.host, "assign_roles", [`0x${Date.now().toString(16)}1`]);
+      await step("assign_roles", [`0x${Date.now().toString(16)}1`]);
       phase = await call("phase");
     }
     if (phase === 1) {
-      await step(keys.host, "start_night");
+      await step("start_night");
       phase = await call("phase");
     }
-    if (phase === 2) {
-      await step(keys.session, "call_meeting");
-      phase = await call("phase");
-    }
-    const deadline = await call("vote_deadline");
-    const now = Math.floor(Date.now() / 1000);
-    return NextResponse.json({
-      phase: PHASES[phase] ?? String(phase),
-      voteDeadline: deadline,
-      secondsLeft: Math.max(0, deadline - now),
-      transactions: txs,
-    });
+    // Stops at NIGHT. The player's browser opens the meeting next.
+    return NextResponse.json({ phase: PHASES[phase] ?? String(phase), transactions: txs });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : String(e), transactions: txs },
