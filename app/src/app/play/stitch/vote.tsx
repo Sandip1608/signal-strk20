@@ -47,6 +47,12 @@ export function VoteTable({
     | { state: "sent"; tx: string }
     | { state: "error"; message: string }
   >({ state: "idle" });
+  const [ballot, setBallot] = useState<
+    | { state: "idle" }
+    | { state: "opening" }
+    | { state: "open"; deadline: number }
+    | { state: "error"; message: string }
+  >({ state: "idle" });
   const max = living.reduce((m, x) => {
     const t = game.tallies[x.seat] ?? 0n;
     return t > m ? t : m;
@@ -227,6 +233,50 @@ export function VoteTable({
                 <p className={st.hint} style={{ color: "#f87171", marginTop: 8 }}>
                   Pool leg failed: {pool.message}
                 </p>
+              )}
+              {onPoolCast && (
+                <div style={{ marginTop: 10 }}>
+                  <button
+                    type="button"
+                    className={`${s.btn} ${s.btnGhost}`}
+                    disabled={ballot.state === "opening"}
+                    onClick={async () => {
+                      setBallot({ state: "opening" });
+                      try {
+                        const r = await fetch("/api/chain/advance", { method: "POST" });
+                        const j = (await r.json()) as {
+                          voteDeadline?: number;
+                          error?: string;
+                        };
+                        if (!r.ok || !j.voteDeadline) {
+                          throw new Error(j.error ?? `HTTP ${r.status}`);
+                        }
+                        setBallot({ state: "open", deadline: j.voteDeadline });
+                      } catch (e) {
+                        setBallot({
+                          state: "error",
+                          message: e instanceof Error ? e.message : String(e),
+                        });
+                      }
+                    }}
+                  >
+                    {ballot.state === "opening"
+                      ? "Opening on-chain ballot…"
+                      : "Open on-chain ballot (host)"}
+                  </button>
+                  {ballot.state === "open" && (
+                    <p className={st.hint} style={{ color: "#10b981", marginTop: 6 }}>
+                      On-chain ballot open until{" "}
+                      {new Date(ballot.deadline * 1000).toLocaleTimeString()} — send the pool
+                      vote before it closes.
+                    </p>
+                  )}
+                  {ballot.state === "error" && (
+                    <p className={st.hint} style={{ color: "#f87171", marginTop: 6 }}>
+                      Could not open the ballot: {ballot.message}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           )}
