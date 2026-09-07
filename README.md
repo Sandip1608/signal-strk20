@@ -239,3 +239,7 @@ strk20.json            sprint scoring file (tx hashes, contracts, demo links)
 Design notes: [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) ·
 Deploy guide: [`docs/DEPLOY.md`](./docs/DEPLOY.md) ·
 Working notes: [`CLAUDE.md`](./CLAUDE.md)
+
+## License
+
+[MIT](./LICENSE).
