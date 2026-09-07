@@ -4,15 +4,23 @@ Hidden-role elimination game (Among Us-style) on **STRK20**, Starknet's
 note-based privacy pool. Built for the STRK20 Private Sprint, RFP-09:
 *"On-chain Among Us with provably fair roles and anonymous votes."*
 
-One round. 5–7 players. One impostor. Everything social is public;
+One round. 5–15 players. A hidden minority. Everything social is public;
 everything identifying is shielded.
+
+> **Implementation status lives in the [README](../README.md#how-signal-uses-strk20).**
+> This document is the *design* — the mechanic↔primitive mapping and the full
+> intended flow. The README's table is the source of truth for what is live
+> on-chain today (contracts, seats, session keys, the vote leg and the reveal)
+> versus what remains gated on the STRK20 SDK + proving service (the encrypted
+> role notes, the private-transfer kill, the escrow token split). Where this
+> doc describes a leg as on-chain, read it as *the design that leg implements*.
 
 ## The mechanic ↔ STRK20 primitive mapping
 
 | Game mechanic | STRK20 primitive | Why it works |
 |---|---|---|
 | Buy-in | **Shield** (deposit → encrypted note) | The pot funds enter the pool; funding wallets are visible at the pool edge but nowhere in the game. |
-| Role assignment | **Encrypted notes** (phase 5 memo, 0-value confidential note per player) | Only the holder's viewing key decrypts their role. On-chain, the host posts `poseidon(impostor_seat, salt)` — a commitment that makes the reveal provably fair. |
+| Role assignment | **Encrypted notes** (phase 5 memo, 0-value confidential note per player) | Only the holder's viewing key decrypts their role. On-chain, the host commits `poseidon(hidden_seats, salt)` where `hidden_seats` is **derived** from a multi-party seed the host cannot steer (see *Provably fair roles* in the README), not a team the host picks — that is what makes the reveal both binding and unbiased. |
 | Night kill | **Private transfer** (a "kill token" note to the victim) | Nobody — not even the round contract — sees who sent it or who received it. The victim decrypts, learns they're dead, and attests to it on-chain with their session key. The body then waits on the deck until another player finds it and calls it in. |
 | Anonymous vote | **`privacy_invoke` with an open-note leg** | The pool withdraws the voter's vote stake to `SignalEscrow`; the escrow reports `(candidate, amount)` publicly to the tally. Sender: hidden inside the pool. Tally: publicly computable (RFP requirement). |
 | Payout | **Open-note deposit** back into the pool | Winners registered a pre-created open note at join time. The escrow returns `OpenNoteDeposit[]` and the pool credits those notes. Never a public ERC-20 transfer to a wallet. |
@@ -46,7 +54,11 @@ everything identifying is shielded.
   `Span<OpenNoteDeposit>`. Holds nothing between calls; the pot lives in
   the pool as an open note.
 - **`app/`** — the STRK20 starter kit (wallet picker, shield, unshield,
-  private transfer) extended with lobby/round screens.
+  private transfer) extended with the lobby/deck/vote/payout screens, the
+  React-free game engine that mirrors `round.cairo`, and the thin chain seam:
+  `game/chain.ts` (join, the pool vote leg, the browser-signed meeting) plus
+  the `app/api/chain/*` host routes (`advance`, `resolve`) and the guarded gas
+  `faucet`.
 
 ## One full round, tx by tx
 
@@ -55,9 +67,13 @@ everything identifying is shielded.
    `set_escrow`. Each player shields the buy-in, generates a burner session
    key locally, pre-creates a payout open note, and calls
    `join(session_key, payout_note_id)` from their main wallet.
-2. **Roles.** Host draws the impostor seat off-chain, posts
-   `assign_roles(poseidon(impostor_seat, salt))`, and sends each player a
-   0-value encrypted note whose memo says `CREW` or `IMPOSTOR`.
+2. **Roles.** The impostor seat(s) are **derived** from the seed the host
+   committed in the constructor, mixed with every player's join-time entropy —
+   the host never names the team. The host posts
+   `assign_roles(poseidon(hidden_seats, salt))` over those derived seats, and
+   sends each player a 0-value encrypted note whose memo says `CREW` or
+   `IMPOSTOR`. (See *Provably fair roles* in the README for why neither side
+   can steer the draw.)
 3. **Night.** `start_night()`. The impostor privately transfers the kill
    note to a victim inside the pool. The victim decrypts it and calls
    `confirm_death()` **with their session key** — that signature is the only
@@ -87,10 +103,13 @@ everything identifying is shielded.
 
 ## Trust model (v1, honest about it)
 
-- **The host is a trusted dealer for role assignment.** The commitment
-  makes the assignment *binding* (host can't re-pick the impostor after
-  the vote), not *unbiased*. A commit-reveal from all players or VRF would
-  fix bias — Phase 2.
+- **Role assignment is binding *and* unbiased.** The constructor commitment
+  makes it binding (the host can't re-pick the impostor after the vote), and
+  because the team is derived from a seed the host committed *before anyone
+  joined* mixed with each player's own entropy, the host cannot aim the draw
+  either. The one residual trust is liveness: the host alone holds `host_seed`
+  and must reveal it to resolve. A player commit-reveal or VRF for the seed
+  itself would remove even that — Phase 2.
 - **Death is self-attested.** The contract cannot see a kill, so it takes the
   victim's signature for it — which also means a player can declare themselves
   dead unprompted. The only seat that ends is their own, at the cost of their
@@ -101,7 +120,7 @@ everything identifying is shielded.
   rather than agreed on by the round. Keeping it out of public storage costs
   the game nothing and the privacy surface stays as small as it was.
 - **Vote privacy = pool anonymity set.** A vote leg is anonymous among
-  pool users, not just among the 5–7 players.
+  pool users, not just among the 5–15 players at the table.
 
 ## Scope cuts (deliberate — don't re-expand, see CLAUDE.md)
 
@@ -119,8 +138,9 @@ everything identifying is shielded.
   seat on-chain — the server pays gas, but **never holds or signs with a player
   key**. A full paymaster would remove even that faucet; it is the documented
   Phase-2 item.
-- **No task minigames, no Secret Hitler/Avalon variants, no paymaster.**
-  Phase 2, only if the Day 2 checklist is done with time to spare.
+- **No multi-night loop, no named Secret Hitler/Avalon variants, no paymaster.**
+  Phase 2. (Task minigames, the seer, bodies-on-the-deck and the on-chain vote
+  leg all landed within the sprint and are no longer cuts.)
 - **Vote amounts are plaintext-after-fill by design** (open-note pattern,
   same as STRK20's own AMM helpers expose swap outputs). The RFP wants a
   publicly computable tally; hiding the count is a non-goal.
