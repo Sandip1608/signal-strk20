@@ -91,7 +91,7 @@ export default function Page() {
         <div className={styles.wordmark}>
           SIGNA<span>L</span>
         </div>
-        <span className={styles.navTag}>STRK20 · Sepolia</span>
+        <span className={styles.navTag}>STRK20 · Mainnet</span>
       </nav>
 
       <header className={styles.hero}>
@@ -136,7 +136,7 @@ export default function Page() {
 
         <div className={styles.chips}>
           <span className={styles.chip}>
-            <b>●</b>&nbsp;Contracts live on Sepolia
+            <b>●</b>&nbsp;Contracts live on mainnet
           </span>
           <span className={styles.chip}>Session keys per seat</span>
           <span className={styles.chip}>5–15 players · bots fill in</span>

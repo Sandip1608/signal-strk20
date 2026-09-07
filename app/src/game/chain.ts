@@ -199,7 +199,7 @@ const STRK_TOKEN = "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f428
 
 /**
  * The real vote stake, deliberately small: 1 STRK. The pool additionally takes
- * its own per-operation fee (2 STRK on the Sepolia pool, `get_fee_amount`).
+ * its own per-operation fee (`get_fee_amount`: 6 STRK on mainnet, 2 on Sepolia).
  * `STAKE_STRK` in the HUD is conceptual; this is what actually moves.
  */
 export const VOTE_STAKE_WEI = 10n ** 18n;

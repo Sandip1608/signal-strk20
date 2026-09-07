@@ -11,7 +11,7 @@ Built for the **STRK20 Private Sprint**, RFP-09: *on-chain Among Us with
 provably fair roles and anonymous votes*.
 
 - 🎮 **Play it live:** https://signal-strk20.onrender.com
-- ⛓️ **Live on Starknet Sepolia** — contracts deployed, seats taken, ballots and votes on-chain (addresses below)
+- ⛓️ **Live on Starknet mainnet** — contracts deployed against the live STRK20 pool (addresses below)
 - 📜 **Design:** [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) · **Deploy:** [`docs/DEPLOY.md`](./docs/DEPLOY.md)
 
 ---
@@ -45,18 +45,25 @@ Starknet state. Only `signal_escrow.cairo` ever touches the pool, via the
 standard `privacy_invoke` path. The privacy-sensitive surface is one small,
 stateless contract.
 
-## Live on Sepolia
+## Live on Starknet mainnet
+
+Deployed and linked against the live STRK20 privacy pool.
 
 | Contract | Address |
 |---|---|
-| `SignalRound` | [`0x252ecaea…6756d`](https://sepolia.voyager.online/contract/0x252ecaea30b870d8ab30075ac7eb4b6e29572dbd0c0464be33396497026756d) |
-| `SignalEscrow` | [`0x7c12b841…11ad8`](https://sepolia.voyager.online/contract/0x7c12b8419a68a412f9397e16e23faf3219b0a547e70e141fff87a295c311ad8) |
-| STRK20 pool (testnet) | [`0x0254a6b2…e0d91`](https://sepolia.voyager.online/contract/0x0254a6b2997ef52e9f830ce1f543f6b29768295e8d17e2267d672c552cfe0d91) |
+| `SignalRound` | [`0x13ea00a5…d9ce`](https://voyager.online/contract/0x13ea00a52a5dc531430b4ddc492d2c9da8c187b7a49d96c86df2771c301d9ce) |
+| `SignalEscrow` | [`0x21006bb8…275cf`](https://voyager.online/contract/0x21006bb87b736db531088782b42ad7eb9d37d1f373c438634625bbe484275cf) |
+| STRK20 privacy pool | [`0x040337b1…812a`](https://voyager.online/contract/0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a) |
 
-Every deploy, join, ballot and vote transaction hash is recorded in
-[`strk20.json`](./strk20.json). Six seats are taken on the live round (four
-scripted players plus a human wallet); the vote and settlement legs run from the
-browser against these contracts.
+`round.escrow()` returns the escrow address and the escrow is constructed with
+the mainnet pool, so the two are wired on-chain. Every deploy transaction hash
+is recorded in [`strk20.json`](./strk20.json); the shield and anonymous vote
+legs that touch the pool run from the browser against these contracts via a
+privacy wallet.
+
+> A Sepolia deployment was used throughout development for rehearsal (the docs
+> pool "for SDK and integration testing"); `deploy.mjs` targets either network
+> via `STARKNET_NETWORK`.
 
 ## Provably fair roles
 
@@ -133,7 +140,7 @@ in-browser engine, which mirrors `round.cairo` assert-for-assert.
 - **Separate devices** — **Host a room** for a 4-letter code. The server runs
   the engine and redacts per viewer: you receive only your own role, your own
   burner key, and only the crewmates in your own room.
-- **On-chain** — connect a Starknet privacy wallet (Ready/Xverse on Sepolia),
+- **On-chain** — connect a Starknet privacy wallet (Ready/Xverse on mainnet),
   **take your seat on chain**, and the vote screen can cast a **real pool vote
   leg** and **settle the round on-chain**.
 
