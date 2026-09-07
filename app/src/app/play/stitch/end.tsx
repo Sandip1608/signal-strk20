@@ -164,11 +164,17 @@ export function PayoutStage({
         ))}
       </div>
 
+      {/* A meltdown loss must not narrate the last ballot. Without this the
+          scene read "the vote tied, nobody went out the airlock" over a round
+          the airlock had nothing to do with. */}
       <Ejection
-        ejected={ejected ? { seat: ejected.seat, name: ejected.name } : null}
+        reactor={game.endedBySabotage}
+        ejected={
+          game.endedBySabotage || !ejected ? null : { seat: ejected.seat, name: ejected.name }
+        }
         caught={ejected !== undefined && hidden.includes(ejected.seat)}
         hiddenLabelSingular={IMPOSTOR_NAME}
-        tied={game.ejected === 0}
+        tied={!game.endedBySabotage && game.ejected === 0}
         confirmEjects={game.confirmEjects}
         final={{ crewWon: game.crewWon, teamNames: hiddenObjs.map((x) => x.name) }}
       />

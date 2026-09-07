@@ -436,6 +436,12 @@ export function applyAction(room: Room, action: Action): void {
     case "fixReactor":
       // The whole point of the meltdown is that somebody has to walk there.
       requireIn(room, action.seat, "reactor");
+      // `fix_reactor` asserts `now <= deadline` on-chain. Without the same check
+      // here, arriving after it blew still cleared it — erasing a win the
+      // impostors had already earned.
+      if (room.ship && !ship.reactorFixable(room.ship)) {
+        throw new engine.ContractError("too late");
+      }
       if (room.ship) room.ship = ship.fixReactor(room.ship);
       break;
 
@@ -523,6 +529,18 @@ export function applyAction(room: Room, action: Action): void {
      */
     case "continue": {
       if (room.hiddenSeats.length === 0) throw new engine.ContractError("roles not assigned");
+      // A blown reactor is decided before anything else: the contract watched
+      // its own deadline pass, so it needs nobody's word for it.
+      if (room.ship && ship.reactorBlown(room.ship)) {
+        room.game = engine.resolveSabotage(g0, {
+          hiddenSeats: room.hiddenSeats,
+          salt: room.salt,
+          hostSeed: room.hostSeed,
+          recomputedCommitment: poseidonCommitment(room.hiddenSeats, room.salt),
+          recomputedSeedCommitment: seedCommitment(room.hostSeed),
+        });
+        break;
+      }
       try {
         room.game = engine.resolveRound(g0, {
           hiddenSeats: room.hiddenSeats,

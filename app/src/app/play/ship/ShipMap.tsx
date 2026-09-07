@@ -26,6 +26,7 @@ import {
   sabotageReady,
   lightsOut,
   lightsOutLeft,
+  reactorFixable,
   reactorGoing,
   reactorSecsLeft,
   neighbours,
@@ -237,10 +238,16 @@ export function ShipMap({
               ? "You are here — stop it."
               : "Get to the Reactor. If it blows, the impostors win."}
           </span>
-          {inReactor && (
+          {/* Once it has blown there is nothing left to stop — the contract
+              rejects a late fix as 'too late', and offering the button anyway
+              suggested the loss could still be undone. */}
+          {inReactor && reactorFixable(ship) && (
             <button type="button" className={s.primary} onClick={onFixReactor}>
               Stop the meltdown
             </button>
+          )}
+          {!reactorFixable(ship) && (
+            <span className={s.alarmText}>Too late — the reactor is gone.</span>
           )}
         </div>
       )}

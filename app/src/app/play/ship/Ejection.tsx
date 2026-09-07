@@ -33,6 +33,7 @@ export function Ejection({
   confirmEjects,
   final,
   onDone,
+  reactor = false,
 }: {
   /** null when the vote tied and nobody went out the airlock. */
   ejected: { seat: number; name: string } | null;
@@ -58,6 +59,8 @@ export function Ejection({
   final: { crewWon: boolean; teamNames: string[] } | null;
   /** Between rounds only: dismiss the scene and get on with the night. */
   onDone?: () => void;
+  /** The meltdown ended it, so there is no airlock beat to play. */
+  reactor?: boolean;
 }) {
   const team = final?.teamNames.join(" and ") ?? "";
   // Beat 1: the drift. Beat 2: was-or-wasn't. Beat 3: the verdict.
@@ -100,7 +103,12 @@ export function Ejection({
       <div className={s.stars} aria-hidden />
       <div className={s.stars2} aria-hidden />
 
-      {tied ? (
+      {reactor ? (
+        <div className={s.centre}>
+          <p className={`${s.line} ${s.show} ${s.bad}`}>The reactor blew.</p>
+          <p className={s.sub}>Nobody stopped the meltdown in time.</p>
+        </div>
+      ) : tied ? (
         <div className={s.centre}>
           {/* `.show` is required — `.line` starts at opacity 0 and is only
               revealed by it, so without this the tie caption is invisible. */}
@@ -116,10 +124,10 @@ export function Ejection({
       )}
 
       <div className={s.captions}>
-        {!tied && ejected && (
+        {!reactor && !tied && ejected && (
           <p className={`${s.line} ${s.show}`}>{ejected.name} was ejected.</p>
         )}
-        {beat >= 1 &&
+        {!reactor && beat >= 1 &&
           (confirmEjects ? (
             // Coloured by whether they were actually caught — not by who won
             // the game, which rendered "was an Impostor" in red whenever the

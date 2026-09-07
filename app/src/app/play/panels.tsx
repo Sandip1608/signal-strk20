@@ -12,9 +12,10 @@ import s from "./play.module.css";
 import { DeviceGate, useDeadline } from "./ui";
 import { ShipMap } from "./ship/ShipMap";
 import { CrewCard } from "./ship/Crewmate";
+import * as shipLib from "@/game/ship";
 import { ownDeviceSeat, useGame } from "@/game/store";
 import { ballotClosed, livingSeats } from "@/game/engine";
-import { displaySeat, type GameState } from "@/game/types";
+import { MAX_ROUNDS, displaySeat, type GameState } from "@/game/types";
 import {
   MAX_IMPOSTORS,
   MAX_TASKS,
@@ -33,10 +34,6 @@ import { PublicLedger, RoleDossier } from "./stitch/role";
 import { EmergencyReport, ImpostorRadar, NightCrewBlind, NightPlayFrame } from "./stitch/night";
 import { VoteTable } from "./stitch/vote";
 import { EjectionStage, PayoutStage } from "./stitch/end";
-import { ROOM_BY_ID, sightingsFor, tasksComplete } from "@/game/ship";
-import { ballotClosed, livingSeats, short } from "@/game/engine";
-import { MAX_ROUNDS, SKIP_VOTE, type GameState, type Seat } from "@/game/types";
-import { CREW_NAME, IMPOSTOR_NAME, impostorLabel } from "@/game/variants";
 
 // ── Lobby ──────────────────────────────────────────────────────────────────
 
@@ -350,66 +347,6 @@ export function RolePanel({ game }: { game: GameState }) {
           cover();
         }}
       />
-    const impostor = viewer.role === "IMPOSTOR";
-    // Populated for an impostor in both modes: locally every role is in state,
-    // and over the relay `viewFor` lets the IMPOSTOR label through to them.
-    const partners = impostor
-      ? game.seats.filter((x) => x.seat !== viewer.seat && x.role === "IMPOSTOR")
-      : [];
-    return (
-      <div className={s.panel}>
-        <h2 className={s.panelTitle}>Decryption ceremony</h2>
-        <p className={s.panelHint}>
-          Assignment note opened locally. Only this seat&apos;s viewing key can read it.
-        </p>
-        <div className={`${s.roleCard} ${impostor ? s.roleImpostor : s.roleCrew}`}>
-          <span className={s.seal} aria-hidden>🔒</span>
-          <Crewmate seat={viewer.seat} size={88} title={viewer.name} />
-          <p className={s.roleLabel}>
-            {impostor ? "Sealed envelope · impostor" : "Commendation note"} · seat {viewer.seat}
-          </p>
-          <p className={s.roleName}>
-            {impostor ? IMPOSTOR_NAME : viewer.role === "SEER" ? "SEER" : CREW_NAME}
-          </p>
-          <p className={s.roleBlurb}>
-            {impostor
-              ? partners.length > 0
-                ? `You are not alone — ${partners.map((x) => x.name).join(" and ")} ${partners.length === 1 ? "is" : "are"} with you. You cannot kill each other. Tonight one of you transfers the kill note to a crewmate, privately, inside the pool.`
-                : "Tonight you transfer the kill note to one player, privately, inside the pool. Nobody sees the sender — not even the round contract."
-              : viewer.role === "SEER"
-                ? "You are crew, but once each night you may check one player and learn whether they are an impostor. The answer is yours alone — the table only hears it if you say it."
-                : "Survive the night, then vote out the impostor. Your vote is anonymous; only the tally is public."}
-          </p>
-          {impostor && (
-            <div className={s.perkList}>
-              <div className={s.perk}>
-                <div className={s.perkName}>Night kill</div>
-                <div className={s.perkHint}>Private transfer — only from the same room, after cooldown.</div>
-              </div>
-              <div className={s.perk}>
-                <div className={s.perkName}>Vents &amp; sabotage</div>
-                <div className={s.perkHint}>Untraceable travel, lights out, reactor meltdown.</div>
-              </div>
-            </div>
-          )}
-          <div className={s.enclave}>
-            <p className={s.enclaveLabel}>Client-side proof enclave · private to you</p>
-            <KeyValue k="Burner session" v={short(viewer.sessionKey)} />
-            <KeyValue k="Payout note" v={short(viewer.payoutNoteId)} />
-            <KeyValue k="Shielded bond" v={`${STAKE_STRK}.00 STRK`} />
-          </div>
-        </div>
-        <button
-          type="button"
-          className={s.btn}
-          onClick={() => {
-            seeRole(viewer.seat);
-            cover();
-          }}
-        >
-          Commit &amp; seal role
-        </button>
-      </div>
     );
   }
 
@@ -428,7 +365,7 @@ export function NightPanel({ game }: { game: GameState }) {
   const {
     viewerSeat, revealed, setViewer, reveal, cover, kill, confirmDeath, reportBody, skipNight,
     ship, moveTo, completeTask, mode, callMeeting, useVent, sabotageLights, fixLights,
-    sabotageReactor, fixReactor, investigate, mySeat,
+    sabotageReactor, fixReactor, investigate, mySeat, continueRound,
   } = useGame();
   const own = ownDeviceSeat(game, mode, mySeat);
   const nightOver = useDeadline(game.nightDeadline);
@@ -461,9 +398,8 @@ export function NightPanel({ game }: { game: GameState }) {
   const victim =
     game.pendingVictim === 0 ? null : (game.seats[game.pendingVictim - 1] ?? null);
 
-  // The victim attests to their own death with their session key — the only
-  // proof of a death the contract can have, since it never learns a kill
-  // happened. It no longer opens the vote: it leaves a body for someone to find.
+  // The victim self-reports with their session key; that call is what opens the
+  // vote. Until then the contract knows nothing about the kill.
   if (victim && !victim.dead && (own === null || victim.seat === own)) {
     if (!revealed) {
       return (
@@ -482,35 +418,12 @@ export function NightPanel({ game }: { game: GameState }) {
         game={game}
         victim={victim}
         onReport={() => {
-          report(victim.seat);
+          // Opening the note kills you and leaves a body; it no longer calls
+          // the meeting. Somebody has to walk in and find you.
+          confirmDeath(victim.seat);
           cover();
         }}
       />
-        ) : (
-          <>
-            <div className={`${s.roleCard} ${s.roleImpostor}`}>
-              <Crewmate seat={victim.seat} size={72} dead title={victim.name} />
-              <p className={s.roleLabel}>Decrypted note</p>
-              <p className={s.roleName}>YOU DIED</p>
-              <p className={s.roleBlurb}>
-                Open the note and you are dead — signed by your burner session key, so it links to
-                your seat and never to the wallet that paid your buy-in. Your body stays where you
-                fell, and the round runs on until somebody walks in and finds it.
-              </p>
-            </div>
-            <button
-              type="button"
-              className={`${s.btn} ${s.btnDanger}`}
-              onClick={() => {
-                confirmDeath(victim.seat);
-                cover();
-              }}
-            >
-              Open the note (session key)
-            </button>
-          </>
-        )}
-      </div>
     );
   }
 
@@ -562,8 +475,6 @@ export function NightPanel({ game }: { game: GameState }) {
               kill(v);
               cover();
             }}
-            bodies={ship ? ship.bodies : {}}
-            onReportBody={(v) => reportBody(viewer.seat, v)}
             partners={
               isImpostor
                 ? game.seats
@@ -571,6 +482,8 @@ export function NightPanel({ game }: { game: GameState }) {
                     .map((x) => x.seat)
                 : []
             }
+            bodies={ship ? ship.bodies : {}}
+            onReportBody={(v) => reportBody(viewer.seat, v)}
             onInvestigate={(target) => investigate(viewer.seat, target)}
             canCheck={
               viewer.role === "SEER" &&
@@ -589,12 +502,26 @@ export function NightPanel({ game }: { game: GameState }) {
         ) : (
           <p className={s.panelHint}>The deck is not ready.</p>
         )}
+        {/* A meltdown decides the round on its own clock, without waiting for
+            a vote — so the host has to be able to finish it from the deck. The
+            ballot's Continue is unreachable from the night, which left a blown
+            reactor with no legal move at all. */}
+        {ship && ship.reactorDeadline !== 0 && !shipLib.reactorFixable(ship) && (
+          <div className={s.btnRow}>
+            <button type="button" className={s.btn} onClick={continueRound}>
+              The reactor blew — continue (host)
+            </button>
+            <span className={s.tagline}>
+              Nobody stopped it in time. Continuing opens the commitment; the impostors win.
+            </span>
+          </div>
+        )}
 
-        {/* A night can end with nobody killed, and then someone has to say so.
-            This control lived only in the pass-the-device roster below, which
-            pinning the viewer to one player made unreachable — so an expired
-            night with no body had no way forward at all. A ghost felt it worst:
-            they cannot call a meeting either, so the round simply stopped. */}
+        {/* A night can end with nobody killed, and then somebody has to say so.
+            This lived only in the pass-the-device roster, which pinning the
+            viewer to one player made unreachable — so an expired night with no
+            body had no way forward. A ghost felt it worst: they cannot call a
+            meeting either, so the round simply stopped. */}
         {nightOver.passed && (
           <div className={s.btnRow}>
             <button type="button" className={`${s.btn} ${s.btnGhost}`} onClick={skipNight}>
@@ -650,7 +577,7 @@ export function VotePanel({ game }: { game: GameState }) {
   // No further round can be opened past this point — see `MAX_ROUNDS`.
   const atRoundCap = game.roundNumber + 1 >= MAX_ROUNDS;
   // The crew's other win. Nobody would know they had won it without being told:
-  // the bar fills and then nothing visibly happens until the host resolves.
+  // the bar fills and then nothing visibly happens until the host continues.
   const tasksDone =
     ship !== null && ship.crewProgress.total > 0 &&
     ship.crewProgress.done >= ship.crewProgress.total;
@@ -701,118 +628,38 @@ export function VotePanel({ game }: { game: GameState }) {
       onPickSeat={setViewer}
       host={
         <div className={s.btnRow}>
+          {/* One button, not two.
+
+              Offering "Next round" and "Reveal & resolve" side by side asked
+              the host to answer a question only the contract can: mid-game the
+              roles are sealed, so nobody at the table knows whether the round
+              is decided. Choosing wrong rounded straight past a win — a table
+              voted out the last impostor and the game dealt another night.
+
+              This asks instead: it tries to finish, and plays on only if the
+              contract's own guard says the game is not over. */}
           <button
             type="button"
-            className={`${s.btn} ${s.btnGhost}`}
-            onClick={endVote}
+            className={s.btn}
+            onClick={continueRound}
             disabled={!voteClosed.passed}
           >
-            {voteClosed.passed ? "Next round (host)" : `Next round in ${voteClosed.secondsLeft}s`}
-          </button>
-          <button type="button" className={s.btn} onClick={resolve} disabled={!voteClosed.passed}>
-            {voteClosed.passed ? "Reveal & resolve (host)" : `Reveal in ${voteClosed.secondsLeft}s`}
+            {voteClosed.passed ? "Continue (host)" : `Continue in ${voteClosed.secondsLeft}s`}
           </button>
           <span className={s.tagline}>
             {!voteClosed.passed
               ? `${toVote.length} still to vote — or wait out the clock`
-              : everyoneVoted
-                ? "Everyone has voted. No need to wait for the clock."
-                : "Ballot closed. Play on, or open the commitment to finish."}
+              : atRoundCap
+                ? `Round ${game.roundNumber + 1} was the last — continuing opens the commitment. Surviving the cap is a crew win.`
+                : tasksDone
+                  ? "Every crew task is done — continuing will count them as a crew win."
+                  : everyoneVoted
+                    ? "Everyone has voted. No need to wait for the clock."
+                    : "Ballot closed. Continue: the contract opens the commitment if the game is decided, and deals another night if it is not."}
           </span>
         </div>
       }
     />
-        <div className={s.btnRow}>
-          <button type="button" className={`${s.btn} ${s.btnGhost}`} onClick={cover}>
-            Cancel
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className={s.panel}>
-      <h2 className={s.panelTitle}>Discussion &amp; vote table</h2>
-      <p className={s.panelHint}>
-        {game.nightVictim === 0
-          ? "Nobody was reported dead. Vote anyway."
-          : `${game.seats[game.nightVictim - 1]?.name} was found dead. Vote to eject.`}{" "}
-        Living players vote once each.
-      </p>
-
-      <div className={s.tableWrap}>
-        <div className={s.orbit}>
-          <div className={s.orbitCore}>Nullifier circuit active</div>
-          {game.seats.map((x) => (
-            <CrewCard
-              key={x.seat}
-              seat={x.seat}
-              name={x.name}
-              dead={x.dead}
-              faded={x.hasVoted}
-              onClick={() => setViewer(x.seat)}
-              disabled={x.dead || x.hasVoted || x.isBot}
-              tag={
-                x.dead
-                  ? "dead"
-                  : x.hasVoted
-                    ? "voted"
-                    : x.isBot
-                      ? "deciding…"
-                      : "tap to vote"
-              }
-            />
-          ))}
-        </div>
-
-        <div className={s.section} style={{ marginTop: 0 }}>
-          <h3 className={s.panelTitle} style={{ fontSize: 14, marginBottom: 8 }}>
-            Public tally ledger
-          </h3>
-          <Tally game={game} />
-          <p className={s.tagline} style={{ display: "block", marginTop: 6 }}>
-            Skip: {String(game.skipTally)} — nobody is ejected unless one player beats this.
-          </p>
-        </div>
-      </div>
-
-      <div className={s.btnRow}>
-        {/* One button, not two.
-
-            Offering "Next round" and "Reveal & resolve" side by side asked the
-            host to answer a question only the contract can: mid-game the roles
-            are sealed, so nobody at the table knows whether the round is
-            decided. Choosing wrong rounded straight past a win — a table voted
-            out the last impostor and the game started another night.
-
-            This asks instead. It tries to finish, and plays on only if the
-            contract's own guard says the game is not over. */}
-        <button
-          type="button"
-          className={s.btn}
-          onClick={continueRound}
-          disabled={!voteClosed.passed}
-        >
-          {voteClosed.passed ? "Continue (host)" : `Continue in ${voteClosed.secondsLeft}s`}
-        </button>
-        <span className={s.tagline}>
-          {!voteClosed.passed
-            ? // The host actions assert `ballot_closed()`, so they stay disabled
-              // rather than firing a call that can only revert.
-              `${toVote.length} still to vote — or wait out the clock`
-            : tasksDone
-              ? "Every crew task is done — open the commitment and the contract will count them as a crew win."
-              : atRoundCap
-              ? // Reaching the cap is itself terminal: the impostors had every
-                // round the game allows.
-                `Round ${game.roundNumber + 1} was the last — continuing will open the commitment and finish. Surviving the cap is a crew win.`
-              : everyoneVoted
-                ? "Everyone has voted. No need to wait for the clock."
-                : "Ballot closed. Continue: the contract opens the commitment if the game is decided, and deals another night if it is not."}
-        </span>
-      </div>
-    </div>
   );
 }
 

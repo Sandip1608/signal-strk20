@@ -179,6 +179,15 @@ export type GameState = {
    * or an ejected player, and open a vote at will.
    */
   unreportedBody: Record<number, boolean>;
+  /**
+   * The round ended on a meltdown rather than a vote.
+   *
+   * The contract already distinguishes these — `resolve_sabotage` is a separate
+   * entrypoint from `resolve_round` — and the resolved screen has to as well,
+   * or a reactor loss narrates the last ballot instead ("the vote tied…") and
+   * reads as though the airlock decided it.
+   */
+  endedBySabotage: boolean;
   /** `seat + 1`; 0 = nobody died this round. */
   nightVictim: number;
   /**

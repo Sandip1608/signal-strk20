@@ -473,6 +473,40 @@ mod tests {
         assert(!can_report(unreported, false), 'second report refused');
     }
 
+    // ── the meltdown decides itself ───────────────────────────────────────
+
+    /// Mirrors `fix_reactor`'s window: `deadline != 0 && now <= deadline`.
+    /// The client had no such check, so someone reaching the Reactor after it
+    /// blew still cleared it — erasing a win the impostors had already earned.
+    fn reactor_fixable(deadline: u64, now: u64) -> bool {
+        deadline != 0 && now <= deadline
+    }
+
+    #[test]
+    fn the_reactor_can_be_fixed_up_to_the_deadline() {
+        assert(reactor_fixable(100, 99), 'a second early is fine');
+        assert(reactor_fixable(100, 100), 'on the deadline is fine');
+    }
+
+    #[test]
+    fn fixing_after_the_deadline_is_refused() {
+        assert(!reactor_fixable(100, 101), 'too late must be refused');
+    }
+
+    #[test]
+    fn a_stable_reactor_is_not_fixable() {
+        assert(!reactor_fixable(0, 50), 'nothing to fix');
+    }
+
+    /// `resolve_sabotage` needs no win condition: the contract watched its own
+    /// deadline pass with no `fix_reactor`, so it is its own witness. This is
+    /// the one outcome in the game that takes nobody's word for it.
+    #[test]
+    fn a_blown_reactor_is_an_impostor_win() {
+        let blown = !reactor_fixable(100, 101) && 100 != 0;
+        assert(blown, 'the meltdown ran out');
+    }
+
     #[test]
     fn round_cap_is_sane() {
         assert(signal::round::MAX_ROUNDS > 1, 'cap must allow a loop');

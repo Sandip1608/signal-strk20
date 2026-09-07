@@ -95,6 +95,7 @@ export function createGame(opts: {
     ejectedWasImpostor: {},
     tasksDone: {},
     unreportedBody: {},
+    endedBySabotage: false,
     nightVictim: NO_SEAT,
     pendingVictim: NO_SEAT,
     tallies: {},
@@ -393,8 +394,6 @@ export function confirmDeath(state: GameState, sessionKey: string): GameState {
   const seats = state.seats.map((s) => (s.seat === victim.seat ? { ...s, dead: true } : s));
   return log(
     {
-      call: "report_night_kill",
-      text: `${victim.name} (seat ${displaySeat(victim.seat)}) reports their own death, signed by burner ${short(sessionKey)}. Vote opens.`,
       ...state,
       seats,
       pendingVictim: NO_SEAT,
@@ -402,7 +401,7 @@ export function confirmDeath(state: GameState, sessionKey: string): GameState {
     },
     {
       call: "confirm_death",
-      text: `${victim.name} (seat ${victim.seat}) opened the note and is dead, signed by burner ${short(sessionKey)}. The body is still where they fell.`,
+      text: `${victim.name} (seat ${displaySeat(victim.seat)}) opened the note and is dead, signed by burner ${short(sessionKey)}. The body is still where they fell.`,
     },
   );
 }
@@ -734,6 +733,56 @@ export function resolveRound(
           ? "The vote tied — nobody was ejected, so the impostor survives."
           : `Seat ${ejected} was ejected.`) +
         ` ${crewWon ? "Crew win." : "Impostor wins."}`,
+    },
+  );
+}
+
+/**
+ * `resolve_sabotage()` — the meltdown ran out, so the impostors win.
+ *
+ * This mirror was simply missing. The contract has had the entrypoint all
+ * along, but nothing on the client could call it, so a blown reactor was not a
+ * loss — it was a dead end: `resolve_round` answers "game not over" because the
+ * impostors are not at parity, and `end_vote` refuses with "resolve the
+ * reactor". The round sat in NIGHT with no legal move, which is the same shape
+ * as the round-cap deadlock.
+ *
+ * Unlike `resolveRound` there is no win condition to check. The contract
+ * watched its own deadline pass with no `fix_reactor`, so it is its own
+ * witness — the one outcome here that needs nobody's word for it. Whether the
+ * reactor actually blew is the caller's to assert, because the deadline lives
+ * in deck state rather than `GameState`.
+ */
+export function resolveSabotage(
+  state: GameState,
+  p: {
+    hiddenSeats: number[];
+    salt: string;
+    hostSeed: string;
+    recomputedCommitment: string;
+    recomputedSeedCommitment: string;
+  },
+): GameState {
+  require_(state.phase === Phase.NIGHT || state.phase === Phase.VOTE, "not in a round");
+  require_(p.recomputedSeedCommitment === state.seedCommitment, "seed mismatch");
+  require_(p.hiddenSeats.length === state.hiddenCount, "wrong hidden count");
+  require_(p.recomputedCommitment === state.roleCommitment, "commitment mismatch");
+
+  return log(
+    {
+      ...state,
+      impostorRevealed: Math.min(...p.hiddenSeats) + 1,
+      hiddenSeats: [...p.hiddenSeats].sort((a, b) => a - b),
+      hostSeed: p.hostSeed,
+      crewWon: false,
+      endedBySabotage: true,
+      phase: Phase.RESOLVED,
+    },
+    {
+      call: "resolve_sabotage",
+      text:
+        `The reactor blew. Commitment opened: the hidden team was ${p.hiddenSeats.join(", ")}. ` +
+        "Impostor wins.",
     },
   );
 }

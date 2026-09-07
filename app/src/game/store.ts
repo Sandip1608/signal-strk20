@@ -477,6 +477,11 @@ export const useGame = create<Store>((set, get) => ({
   },
 
   fixReactor: () => {
+    const stR = get();
+    if (stR.mode === "local" && stR.ship && !ship.reactorFixable(stR.ship)) {
+      set({ error: "too late" });
+      return;
+    }
     if (get().mode === "online") {
       void get().send({ type: "fixReactor" });
       return;
@@ -533,6 +538,20 @@ export const useGame = create<Store>((set, get) => ({
     }
     const g = get().game;
     if (!g || g.hiddenSeats.length === 0) return;
+    const st = get();
+    // A blown reactor is decided before anything else — see the relay's note.
+    if (st.ship && ship.reactorBlown(st.ship)) {
+      apply(set, (s) =>
+        engine.resolveSabotage(s, {
+          hiddenSeats: g.hiddenSeats,
+          salt: g.salt,
+          hostSeed: hostSeedRef.current,
+          recomputedCommitment: poseidonCommitment(g.hiddenSeats, g.salt),
+          recomputedSeedCommitment: seedCommitment(hostSeedRef.current),
+        }),
+      );
+      return;
+    }
     try {
       const finished = engine.resolveRound(g, {
         hiddenSeats: g.hiddenSeats,

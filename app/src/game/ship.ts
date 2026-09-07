@@ -436,6 +436,17 @@ export function fixReactor(ship: ShipState): ShipState {
   return { ...ship, reactorDeadline: 0 };
 }
 
+/**
+ * Is there still time to stop the meltdown?
+ *
+ * `fix_reactor` on-chain asserts `now <= reactor_deadline` ('too late'); the
+ * client had no such check, so someone standing in Reactor could clear a
+ * meltdown that had already blown and erase a win the impostors had earned.
+ */
+export function reactorFixable(ship: ShipState, now = Date.now()): boolean {
+  return ship.reactorDeadline !== 0 && now <= ship.reactorDeadline;
+}
+
 /** Whether the impostor may kill right now. */
 export function killReady(ship: ShipState, now = Date.now()): boolean {
   return now >= ship.killReadyAt;
